@@ -82,6 +82,7 @@ def test_prefilter_catches_injection(text):
         ("a gory monster fight", "violence"),
         ("the pirates get drunk on the ship", "substances"),
         ("a bear who smokes cigarettes", "substances"),
+        ("a raccoon smoking weed", "substances"),
         ("a robot that says shit", "profanity"),
         ("a bunny with a shotgun", "weapons"),
         ("kids who play with matches", "dangerous_imitation"),
@@ -117,6 +118,12 @@ def test_banned_words_scan_reports_every_hit():
 
 def test_banned_words_scan_passes_clean_story():
     story = 'Alice yawned. "Goodnight, Bob," she whispered, and the killer whale nightlight glowed.'
+    assert guardrails.banned_words(story) == []
+
+
+def test_banned_words_scan_ignores_garden_weeds():
+    # Seen in an eval run: a robot-gardener story failed the gate on "weed" three times.
+    story = "Bolt found a weed by the tomatoes. He pulled weeds all morning, then rested in the weed-free bed."
     assert guardrails.banned_words(story) == []
 
 
