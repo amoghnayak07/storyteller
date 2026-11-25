@@ -192,6 +192,26 @@ class ConsistencyResult:
         return max(values) - min(values) if values else 0
 
 
+def draft_verdict(draft: pipeline.Draft) -> str:
+    """One line on a draft: its length and every reason it failed (or "passed")."""
+    c, review = draft.checks, draft.review
+    reasons = []
+    if not c.in_range:
+        reasons.append("outside 300-800")
+    if review is None:
+        reasons.append("judge refused (unsafe)")
+    elif not review.safe:
+        reasons.append(f"unsafe: {review.safety_issue}")
+    if c.banned:
+        reasons.append(f"banned words {sorted(set(c.banned))}")
+    if review is not None:
+        if missing := judge.missing_steps(review):
+            reasons.append(f"missing steps {missing}")
+        if low := judge.low_scores(review):
+            reasons.append("below 4: " + ", ".join(f"{n} {review.scores()[n].score}" for n in low))
+    return f"{c.word_count} words, score {_fmt(mean_score(review))}: {'; '.join(reasons) or 'passed'}"
+
+
 def mean_score(review: JudgeResult | None) -> float | None:
     """Average of the 8 rubric scores, or ``None`` if the judge refused."""
     if review is None:
@@ -518,6 +538,13 @@ def _cases_section(results: list[CaseResult]) -> list[str]:
     if declined:
         lines += ["### Decline replies", "", "| Case | Request | Reply |", "|---|---|---|"]
         lines += [f"| {r.case.name} | {_cell(r.case.request, 60)} | {_cell(r.message, 160)} |" for r in declined]
+        lines.append("")
+    revised = [r for r in results if len(r.drafts) > 1]
+    if revised:
+        lines += ["### Revision rounds", "", "Why each draft passed or failed, for every case that needed more than one.", ""]
+        for r in revised:
+            lines.append(f"- `{r.case.name}` (target {r.case.words}, {r.outcome}):")
+            lines += [f"  {i}. {draft_verdict(d)}" for i, d in enumerate(r.drafts, 1)]
         lines.append("")
     errors = [r for r in results if r.outcome == "error"]
     if errors:

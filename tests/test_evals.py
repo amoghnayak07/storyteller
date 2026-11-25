@@ -82,6 +82,15 @@ def test_missing_ingredients_are_answered_with_you_pick(fake_client):
     assert result.outcome == "story"
 
 
+def test_report_explains_each_revision_round(fake_client):
+    fake_client(msg(intake_json()), msg(plan_json()), msg(STORY), judged(score=3), msg(REVISED), judged())
+    result = evals.run_case(_case())
+    report = evals.render_report([result], [], [], seconds=1)
+    assert "### Revision rounds" in report
+    assert "1. 390 words, score 3.00: below 4: request_fidelity 3" in report
+    assert "2. 390 words, score 5.00: passed" in report
+
+
 def test_injection_case_is_declined_without_llm_calls(fake_client):
     client = fake_client()
     result = evals.run_case(_case("block_injection"))
