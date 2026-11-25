@@ -80,6 +80,48 @@ def test_decline_prints_the_hint(fake_client, typed, capsys):
     assert out.rstrip().endswith("Okay, sweet dreams!")
 
 
+def test_diagram_prints_mermaid_without_asking_or_calling(fake_client, typed, capsys):
+    client = fake_client()
+    typed()  # any prompt would pop from an empty queue and fail
+    assert main.main(["--diagram"]) == 0
+    out = capsys.readouterr().out
+    assert "graph TD;" in out
+    for edge in ("__start__ --> intake;", "regenerate --> storyteller;", "edit_intake -.-> reviser;"):
+        assert edge in out
+    assert client.messages.calls == []
+
+
+class _Tty:
+    def __init__(self):
+        self.parts: list[str] = []
+
+    def isatty(self):
+        return True
+
+    def write(self, text):
+        self.parts.append(text)
+
+    def flush(self):
+        pass
+
+
+def test_typewrite_replays_word_by_word_on_a_terminal(monkeypatch):
+    tty = _Tty()
+    sleeps: list[float] = []
+    monkeypatch.setattr(main.sys, "stdout", tty)
+    monkeypatch.setattr(main.time, "sleep", sleeps.append)
+    text = "One two  three.\n\nFour."
+    main.typewrite(text, delay=0.01)
+    assert "".join(tty.parts) == text + "\n"
+    assert len(sleeps) == 4
+
+
+def test_typewrite_prints_at_once_when_not_a_terminal(monkeypatch, capsys):
+    monkeypatch.setattr(main.time, "sleep", lambda s: pytest.fail("should not sleep"))
+    main.typewrite("Hello there.")
+    assert capsys.readouterr().out == "Hello there.\n"
+
+
 def test_main_prints_llm_errors_as_one_line(monkeypatch, typed, capsys):
     import llm
 
