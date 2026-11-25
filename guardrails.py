@@ -89,7 +89,7 @@ _BLOCKED_PATTERNS: dict[BlockedCategory, tuple[str, ...]] = {
         r"sex", r"sexy", r"sexual\w*", r"porn\w*", r"naked", r"nude", r"erotic\w*",
     ),
     "substances": (
-        r"cocaine", r"heroin", r"meth", r"marijuana", r"weed", r"drunk\w*",
+        r"cocaine", r"heroin", r"meth", r"marijuana", r"smok(e|es|ed|ing)\s+weed", r"drunk\w*",
         r"alcohol\w*", r"beers?", r"vodka", r"whiske?y", r"booze", r"cigarettes?",
         r"cigars?", r"vap(e|es|ing)",
     ),
@@ -116,8 +116,6 @@ _ALLOWED_PHRASES: tuple[str, ...] = (
     r"killer\s+whales?",
     r"bath\s+bombs?",
     r"photo-?bomb\w*",
-    r"weed(s|ing)?\s+the\s+garden",
-    r"garden\s+weeds?",
 )
 
 _INJECTION_RE = re.compile("|".join(_INJECTION_PATTERNS), re.IGNORECASE | re.DOTALL)

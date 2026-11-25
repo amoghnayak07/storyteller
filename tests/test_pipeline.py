@@ -602,10 +602,40 @@ def test_length_edit_is_clamped_and_noted_with_the_new_story(fake_client, graph,
     result = run(graph, Command(resume="make it 1000 words"), thread)
 
     assert result["target_words"] == guardrails.MAX_WORDS
-    assert sum(b.word_budget for b in result["plan"].beats) == guardrails.MAX_WORDS
-    assert "<target_words>\n800" in user_turn(client.messages.calls[5])
+    # The writers aim below the hard cap; the user's number is kept.
+    assert sum(b.word_budget for b in result["plan"].beats) == pipeline.WRITE_CAP
+    assert f"<target_words>\n{pipeline.WRITE_CAP}" in user_turn(client.messages.calls[5])
     notes = result["__interrupt__"][0].value["notes"]
     assert notes == ["800 words is the longest story I tell, so I'll make it 800."]
+
+
+@pytest.mark.parametrize("target, aim", [(300, 300), (500, 500), (760, 760), (761, 760), (800, 760)])
+def test_writing_target_caps_below_the_hard_limit(target, aim):
+    assert pipeline.writing_target(target) == aim
+    assert pipeline.WRITE_CAP < guardrails.MAX_WORDS
+
+
+def test_an_800_word_request_is_planned_written_and_judged_at_the_cap(fake_client, graph, thread):
+    client = fake_client(msg(intake_json()), msg(plan_json()), msg(STORY), judged())
+    result = run(graph, pipeline.initial_state("Alice and Bob the cat", 9, 800), thread)
+
+    aim = f"<target_words>\n{pipeline.WRITE_CAP}\n"
+    planner, storyteller, judge_call = client.messages.calls[1:4]
+    for call in (planner, storyteller, judge_call):
+        assert aim in user_turn(call)
+    assert sum(b.word_budget for b in result["plan"].beats) == pipeline.WRITE_CAP
+    assert result["drafts"][-1].checks.target_words == pipeline.WRITE_CAP
+    assert result["target_words"] == 800
+    assert result["final_target_words"] == 800
+
+
+def test_failed_edit_restores_the_users_target_not_the_capped_aim(fake_client, graph, thread):
+    fake_client(msg(intake_json()), msg(plan_json()), msg(STORY), judged(),
+                msg(edit_json(edit_kind="structural", ingredients={**ALICE, "setting": "the beach"})), refusal())
+    run(graph, pipeline.initial_state("Alice and Bob the cat", 9, 800), thread)
+    result = run(graph, Command(resume="set it at the beach"), thread)
+    assert result["final_story"] == STORY
+    assert result["target_words"] == 800
 
 
 def test_off_task_edit_gets_the_fixed_reply_without_an_llm_call(fake_client, graph, thread):
