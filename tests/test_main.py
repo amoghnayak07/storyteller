@@ -55,7 +55,7 @@ def test_verbose_prints_the_trace(fake_client, typed, capsys):
     main.run_story("Alice and Bob", 7, 500, verbose=True)
     out = capsys.readouterr().out
     for fragment in ("[intake]", "verdict: story", "[planner]", "title: Bob and the Big Fence",
-                     "[judge]", "scores: request_fidelity 5", "story circle: all 8 steps",
+                     "[judge]", "scores: request_fidelity 5", "formula: all 5 steps",
                      "checks: 390/500 words", "result: PASS", "cache read 0", "wrote a draft of 390 words"):
         assert fragment in out
 

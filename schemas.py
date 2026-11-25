@@ -12,7 +12,7 @@ constraints of Anthropic's JSON-schema grammar:
   adaptive thinking; asking it to put reasoning in the output can trigger a
   refusal. The judge records ``evidence`` (a quote) and a ``fix`` instead.
 
-Structural rules the grammar cannot express (e.g. "exactly 8 beats, in order")
+Structural rules the grammar cannot express (e.g. "exactly 5 beats, in order")
 are enforced with Pydantic validators; a violation raises ``ValidationError``,
 which the LLM layer turns into one retry.
 """
@@ -39,17 +39,14 @@ Category = Literal[
     "calming",
 ]
 
-# The eight steps of Dan Harmon's Story Circle, in order.
-StoryStep = Literal["you", "need", "go", "search", "find", "take", "return", "change"]
+# The five steps of the bedtime formula, in order.
+StoryStep = Literal["hook", "problem", "middle", "resolve", "wind_down"]
 STORY_STEPS: tuple[StoryStep, ...] = (
-    "you",
-    "need",
-    "go",
-    "search",
-    "find",
-    "take",
-    "return",
-    "change",
+    "hook",
+    "problem",
+    "middle",
+    "resolve",
+    "wind_down",
 )
 
 IngredientName = Literal["character", "setting", "background", "moral"]
@@ -177,10 +174,10 @@ class StoryPlan(_Strict):
 
     @field_validator("beats")
     @classmethod
-    def _eight_beats_in_order(cls, beats: list[Beat]) -> list[Beat]:
+    def _five_beats_in_order(cls, beats: list[Beat]) -> list[Beat]:
         steps = tuple(beat.step for beat in beats)
         if steps != STORY_STEPS:
-            raise ValueError(f"beats must be the 8 Story Circle steps in order {STORY_STEPS}, got {steps}")
+            raise ValueError(f"beats must be the 5 bedtime formula steps in order {STORY_STEPS}, got {steps}")
         return beats
 
     @field_validator("ingredients")
@@ -213,12 +210,12 @@ class StepCheck(_Strict):
 
 
 class JudgeResult(_Strict):
-    story_circle: list[StepCheck]
+    formula_steps: list[StepCheck]
     request_fidelity: CriterionScore
     age_fit: CriterionScore
     hook: CriterionScore
     agency: CriterionScore
-    stakes: CriterionScore
+    gentle_middle: CriterionScore
     lesson_shown: CriterionScore
     dialogue_imagery: CriterionScore
     bedtime_landing: CriterionScore
@@ -226,12 +223,12 @@ class JudgeResult(_Strict):
     safety_issue: str
     """What is unsafe, or "" if safe."""
 
-    @field_validator("story_circle")
+    @field_validator("formula_steps")
     @classmethod
-    def _all_eight_steps(cls, checks: list[StepCheck]) -> list[StepCheck]:
+    def _all_five_steps(cls, checks: list[StepCheck]) -> list[StepCheck]:
         steps = tuple(check.step for check in checks)
         if steps != STORY_STEPS:
-            raise ValueError(f"story_circle must check the 8 steps in order {STORY_STEPS}, got {steps}")
+            raise ValueError(f"formula_steps must check the 5 steps in order {STORY_STEPS}, got {steps}")
         return checks
 
     def scores(self) -> dict[str, CriterionScore]:
@@ -244,7 +241,7 @@ SCORED_CRITERIA: tuple[str, ...] = (
     "age_fit",
     "hook",
     "agency",
-    "stakes",
+    "gentle_middle",
     "lesson_shown",
     "dialogue_imagery",
     "bedtime_landing",

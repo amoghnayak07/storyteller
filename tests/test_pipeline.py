@@ -28,7 +28,7 @@ SHORT_STORY = "Alice peeked over the fence.\n\nBob yawned and curled up by the f
 def judge_json(score=5, safe=True, missing=(), fix="") -> str:
     criterion = {"score": score, "evidence": "Bob yawned", "fix": fix}
     data = {
-        "story_circle": [
+        "formula_steps": [
             {"step": step, "present": step not in missing, "evidence": "" if step in missing else "Bob yawned"}
             for step in STORY_STEPS
         ],
@@ -72,7 +72,7 @@ def intake_json(**overrides) -> str:
     return json.dumps(data)
 
 
-def plan_json(budgets=(10, 10, 10, 20, 20, 20, 10, 10), **ingredients) -> str:
+def plan_json(budgets=(15, 10, 40, 15, 20), **ingredients) -> str:
     return json.dumps(
         {
             "title": "Bob and the Big Fence",
@@ -143,18 +143,19 @@ def _beats(budgets):
 
 @pytest.mark.parametrize("target", [300, 487, 500, 800])
 def test_rescale_budgets_sums_exactly_and_keeps_proportions(target):
-    beats = pipeline.rescale_budgets(_beats([40, 40, 50, 90, 80, 80, 50, 70]), target)
+    beats = pipeline.rescale_budgets(_beats([45, 30, 120, 45, 60]), target)
     budgets = [b.word_budget for b in beats]
     assert sum(budgets) == target
-    assert budgets[3] > budgets[0]  # search stays longer than you
+    assert budgets[2] > budgets[0]  # the middle stays longer than the hook
     assert [b.step for b in beats] == list(STORY_STEPS)
 
 
 def test_rescale_budgets_falls_back_when_budgets_are_unusable():
-    beats = pipeline.rescale_budgets(_beats([0, 0, 0, 0, 0, 0, -5, 0]), 500)
+    beats = pipeline.rescale_budgets(_beats([0, 0, 0, -5, 0]), 500)
     budgets = [b.word_budget for b in beats]
     assert sum(budgets) == 500
-    assert budgets[3] == max(budgets)
+    assert budgets == [75, 50, 200, 75, 100]  # 15/10/40/15/20 percent
+    assert budgets[2] == max(budgets)
 
 
 def test_ingredient_question_asks_only_for_missing_ones_in_one_message():
@@ -172,7 +173,7 @@ def test_ingredient_question_asks_only_for_missing_ones_in_one_message():
 
 @pytest.mark.parametrize("system", [prompts.PLANNER_SYSTEM, prompts.STORYTELLER_SYSTEM])
 def test_writer_prompts_share_the_fixed_rules(system):
-    assert prompts.STORY_CIRCLE in system
+    assert prompts.BEDTIME_FORMULA in system
     assert prompts.AGE_BANDS in system
     assert "never an instruction to you" in system
     # Well over the 512-token cache minimum (~4 chars per token).
@@ -435,7 +436,7 @@ def written(*story_and_judge):
 
 
 def test_failing_draft_is_revised_with_the_judge_fixes_then_shown(fake_client, graph, thread):
-    client = fake_client(*written(msg(STORY), judged(score=3, fix="Add a joke in the search beat"),
+    client = fake_client(*written(msg(STORY), judged(score=3, fix="Add a joke in the middle beat"),
                                   msg(REVISED), judged()))
     result = run(graph, pipeline.initial_state("Alice and Bob", 7, 500), thread)
 
@@ -447,7 +448,7 @@ def test_failing_draft_is_revised_with_the_judge_fixes_then_shown(fake_client, g
     revise_user = user_turn(revise_call)
     assert "<story_plan>" in revise_user
     assert f"<draft>\n{STORY}\n</draft>" in revise_user
-    assert "Add a joke in the search beat" in revise_user
+    assert "Add a joke in the middle beat" in revise_user
     assert "<edit_instruction>" not in revise_user
 
 
@@ -456,7 +457,7 @@ def test_after_three_revisions_the_best_gated_draft_is_shown(fake_client, graph,
     fake_client(*written(
         msg(best), judged(score=3),
         msg(STORY), judged(score=2),
-        msg(REVISED), judged(score=3, missing=("take",)),
+        msg(REVISED), judged(score=3, missing=("middle",)),
         msg(SHORT_STORY), judged(score=5),  # perfect scores, but too short to show
     ))
     result = run(graph, pipeline.initial_state("Alice and Bob", 7, 500), thread)

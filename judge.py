@@ -6,7 +6,7 @@ Two halves (PLAN.md, "Rubric"):
   300-800 gate, because LLMs miscount words), Flesch-Kincaid readability
   (feedback only), a moralizing-phrase scan (feedback only) and the banned-word
   scan (half of the safety gate).
-- **The LLM judge** (``judge_story``) at effort ``high``: the Story Circle
+- **The LLM judge** (``judge_story``) at effort ``high``: the bedtime formula
   checklist, eight 1-5 criteria with evidence and a fix, and the ``safe`` flag.
   It never sees the plan, so it grades the story the child will hear, not the
   story we meant to write.
@@ -132,7 +132,7 @@ class Checks:
             )
             notes.append(
                 f"Length: the story is {self.word_count} words; the target is {self.target_words}.{hard} "
-                f"{verb} about {abs(diff)} words, keeping all 8 steps."
+                f"{verb} about {abs(diff)} words, keeping all 5 steps."
             )
         if not self.readable:
             notes.append(
@@ -223,7 +223,7 @@ def passes_hard_gates(result: JudgeResult | None, checks: Checks) -> bool:
 def missing_steps(result: JudgeResult | None) -> list[str]:
     if result is None:
         return list(STORY_STEPS)
-    return [check.step for check in result.story_circle if not check.present]
+    return [check.step for check in result.formula_steps if not check.present]
 
 
 def low_scores(result: JudgeResult | None) -> list[str]:
@@ -233,7 +233,7 @@ def low_scores(result: JudgeResult | None) -> list[str]:
 
 
 def passes(result: JudgeResult | None, checks: Checks) -> bool:
-    """The loop's stop condition: hard gates, all 8 steps, every criterion >= 4."""
+    """The loop's stop condition: hard gates, all 5 steps, every criterion >= 4."""
     return passes_hard_gates(result, checks) and not missing_steps(result) and not low_scores(result)
 
 
@@ -261,9 +261,9 @@ def revision_notes(result: JudgeResult | None, checks: Checks) -> list[str]:
         if not result.safe:
             issue = result.safety_issue.strip() or "something in the story is not safe for ages 5-10"
             notes.append(f"Safety: {issue}. Rewrite that part so it fits the content rules.")
-        for check in result.story_circle:
+        for check in result.formula_steps:
             if not check.present:
-                notes.append(f"Story Circle: the '{check.step}' step is missing or too weak. Make it clear.")
+                notes.append(f"Bedtime formula: the '{check.step}' step is missing or too weak. Make it clear.")
         for name, c in result.scores().items():
             if c.score < PASS_SCORE or c.fix.strip():
                 fix = c.fix.strip() or "Improve this."

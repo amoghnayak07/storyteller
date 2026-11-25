@@ -32,8 +32,8 @@ def _criterion(score=4):
 
 
 def _judge(steps=STORY_STEPS):
-    payload = {"story_circle": [{"step": s, "present": True, "evidence": "q"} for s in steps]}
-    payload |= {name: _criterion() for name in JudgeResult.model_fields if name not in {"story_circle", "safe", "safety_issue"}}
+    payload = {"formula_steps": [{"step": s, "present": True, "evidence": "q"} for s in steps]}
+    payload |= {name: _criterion() for name in JudgeResult.model_fields if name not in {"formula_steps", "safe", "safety_issue"}}
     return payload | {"safe": True, "safety_issue": ""}
 
 
@@ -54,19 +54,20 @@ def test_ingredients_reports_missing_and_delegated():
 # --------------------------------------------------------------------------- #
 
 
-def test_plan_accepts_eight_ordered_beats():
+def test_plan_accepts_five_ordered_beats():
     plan = StoryPlan.model_validate({"title": "T", "ingredients": RESOLVED, "beats": _beats()})
 
     assert [beat.step for beat in plan.beats] == list(STORY_STEPS)
+    assert STORY_STEPS == ("hook", "problem", "middle", "resolve", "wind_down")
 
 
 @pytest.mark.parametrize(
     "steps",
-    [STORY_STEPS[:7], tuple(reversed(STORY_STEPS)), STORY_STEPS + ("change",)],
-    ids=["seven-beats", "out-of-order", "nine-beats"],
+    [STORY_STEPS[:4], tuple(reversed(STORY_STEPS)), STORY_STEPS + ("wind_down",)],
+    ids=["four-beats", "out-of-order", "six-beats"],
 )
-def test_plan_rejects_anything_but_the_eight_steps_in_order(steps):
-    with pytest.raises(ValidationError, match="8 Story Circle steps"):
+def test_plan_rejects_anything_but_the_five_steps_in_order(steps):
+    with pytest.raises(ValidationError, match="5 bedtime formula steps"):
         StoryPlan.model_validate({"title": "T", "ingredients": RESOLVED, "beats": _beats(steps)})
 
 
@@ -85,12 +86,12 @@ def test_plan_rejects_unresolved_ingredients():
 def test_judge_exposes_scored_criteria():
     judge = JudgeResult.model_validate(_judge())
 
-    assert set(judge.scores()) == set(JudgeResult.model_fields) - {"story_circle", "safe", "safety_issue"}
+    assert set(judge.scores()) == set(JudgeResult.model_fields) - {"formula_steps", "safe", "safety_issue"}
 
 
-def test_judge_must_check_all_eight_steps():
-    with pytest.raises(ValidationError, match="story_circle"):
-        JudgeResult.model_validate(_judge(STORY_STEPS[:6]))
+def test_judge_must_check_all_five_steps():
+    with pytest.raises(ValidationError, match="formula_steps"):
+        JudgeResult.model_validate(_judge(STORY_STEPS[:4]))
 
 
 def test_scores_outside_one_to_five_are_rejected():
