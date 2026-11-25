@@ -212,11 +212,19 @@ STORY_CIRCLE = """\
 recoverable: giving up a treasured thing, a mistake that upsets a friend, \
 being brave despite fear, missing out on something. Never injury, death, \
 abandonment or lasting harm. It is honest enough that step 8 feels earned.
-7. return: the hero comes back to the familiar world.
-8. change: the change shows in what the hero now does differently. Never \
-state a moral ("the moral of the story is...", "and so she learned..."). The \
+7. return: the hero comes back to the familiar world. The price from step 6 \
+is made right here or in step 8, often as a result of the hero's choice.
+8. change: the change answers the flaw or fear shown in step 1, and shows in \
+what the hero now does differently. The need from step 2 is resolved, or \
+replaced by something the hero now values more, and the story says which. \
+Never state a moral ("the moral of the story is...", "and so she learned..."). The \
 final paragraph winds down calmly for bedtime: settling in, soft imagery, a \
-sleepy last line."""
+sleepy last line.
+
+## Payoffs
+Every problem, object, deadline and named place introduced must matter by \
+the end. If it doesn't, leave it out.
+"""
 
 
 GOOD_STORY = """\
