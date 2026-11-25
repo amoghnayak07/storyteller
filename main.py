@@ -4,16 +4,20 @@ Before submitting the assignment, describe here in a few sentences what you woul
 """
 
 # The CLI is a thin driver: it collects the request, age and length, runs the
-# graph in pipeline.py, and answers each interrupt with what the user types.
+# graph in pipeline.py, prints the progress lines the nodes stream, and answers
+# each interrupt with what the user types. --verbose adds a trace of every node.
 
 from __future__ import annotations
 
+import argparse
 import sys
 import uuid
+from typing import Any
 
 from langgraph.types import Command
 
 import guardrails
+import judge
 import llm
 import pipeline
 
@@ -46,40 +50,152 @@ def ask_number(prompt: str, low: int, high: int, default: int) -> int:
         print(f"Please type a whole number from {low} to {high}.")
 
 
-def run_story(request: str, age: int, target_words: int) -> None:
+# --------------------------------------------------------------------------- #
+# Running the graph
+# --------------------------------------------------------------------------- #
+
+
+def run_story(request: str, age: int, target_words: int, *, verbose: bool = False) -> None:
     graph = pipeline.build_graph()
     config = {"configurable": {"thread_id": str(uuid.uuid4())}}
-    result = graph.invoke(pipeline.initial_state(request, age, target_words), config)
+    command: Any = pipeline.initial_state(request, age, target_words)
 
-    while result.get("__interrupt__"):
-        payload = result["__interrupt__"][0].value
-        print()
-        print(payload["message"])
-        if payload["kind"] == "decline":
-            hint = 'Type "y" to hear that one, ' if payload.get("suggestion") else "Type "
-            print(f"{hint}a new idea, or press Enter to stop.")
-        reply = ask("> ")
-        result = graph.invoke(Command(resume=reply), config)
+    while True:
+        for mode, chunk in graph.stream(command, config, stream_mode=["updates", "custom"]):
+            if mode == "custom":
+                print(chunk["status"])
+            elif verbose:
+                for node, update in chunk.items():
+                    if node not in _UNTRACED and update:
+                        print("\n".join(trace_lines(node, update)))
+        snapshot = graph.get_state(config)
+        if not snapshot.interrupts:
+            break
+        command = Command(resume=answer_interrupt(snapshot.interrupts[0].value))
 
-    story = result.get("final_story")
-    if not story:
+    values = snapshot.values
+    if values.get("apology"):
+        print(f"\n{values['apology']}")
+    elif values.get("final_story"):
+        print("\nGoodnight, sleep tight!")
+    else:
         print("\nOkay, sweet dreams!")
-        return
-    for note in result.get("notes", []):
-        print(f"\n{note}")
-    print()
-    print(result["plan"].title)
-    print()
-    print(story)
 
 
-def main() -> int:
+def answer_interrupt(payload: dict[str, Any]) -> str:
+    """Show an interrupt's message (and the story, when there's a new one) and read the reply."""
+    print()
+    if payload["kind"] == "edit" and payload.get("new_story"):
+        for note in payload.get("notes", []):
+            print(note)
+            print()
+        print(payload["title"])
+        print()
+        print(payload["story"])
+        print()
+    print(payload["message"])
+    if payload["kind"] == "decline":
+        hint = 'Type "y" to hear that one, ' if payload.get("suggestion") else "Type "
+        print(f"{hint}a new idea, or press Enter to stop.")
+    return ask("> ")
+
+
+# --------------------------------------------------------------------------- #
+# --verbose trace
+# --------------------------------------------------------------------------- #
+
+
+# Interrupt nodes only record the user's reply, which the user just typed.
+_UNTRACED = frozenset({"__interrupt__", "ask_ingredients", "decline", "ask_edit"})
+
+
+def trace_lines(node: str, update: dict[str, Any]) -> list[str]:
+    """Readable trace lines for one node's state update."""
+    lines = [f"  [{node}]"]
+    if node in ("intake", "edit_intake") and "verdict" in update:
+        if node == "intake":
+            lines.append(f"    verdict: {update['verdict']}  category: {update['category']}  "
+                         f"blocked: {update['blocked_category']}")
+        else:
+            lines.append(f"    verdict: {update['verdict']}")
+        if update.get("ingredients") is not None:
+            lines.append(f"    ingredients: {update['ingredients'].model_dump()}")
+        if update.get("extras"):
+            lines.append(f"    extras: {update['extras']}")
+        if update.get("edit_kind"):
+            lines.append(f"    edit: {update['edit_kind']}: {update['edit_instruction']} "
+                         f"(target {update['target_words']} words)")
+        for note in update.get("notes", []):
+            lines.append(f"    note: {note}")
+    elif node == "planner" and "plan" in update:
+        plan = update["plan"]
+        lines.append(f"    title: {plan.title}")
+        lines.append(f"    ingredients: {plan.ingredients.model_dump()}")
+        for beat in plan.beats:
+            lines.append(f"    {beat.step:<7} {beat.word_budget:>3}w  {beat.summary}")
+    elif node in ("storyteller", "reviser") and "candidate" in update:
+        if update["candidate"]:
+            round_ = ""
+            if node == "reviser":
+                count = update["revision_count"]
+                round_ = f" (revision {count})" if count else " (the requested change)"
+            lines.append(f"    wrote a draft of {judge.word_count(update['candidate'])} words{round_}")
+        else:
+            lines.append("    declined to write; stopping revisions")
+    elif node == "judge" and update.get("drafts"):
+        lines += _judge_lines(update["drafts"][-1], len(update["drafts"]))
+    elif node == "regenerate":
+        lines.append("    no draft passed the hard gates; writing once more from the plan")
+    elif node == "finish":
+        lines.append("    showing the best draft that passed the hard gates"
+                     if update.get("story_fresh") else "    no draft passed the hard gates")
+
+    usage = update.get("usage")
+    if usage and usage.calls:
+        lines.append(f"    tokens: in {usage.input_tokens}, out {usage.output_tokens}, "
+                     f"cache read {usage.cache_read_tokens}, cache write {usage.cache_write_tokens} "
+                     f"({usage.calls} call{'s' if usage.calls != 1 else ''})")
+    return lines
+
+
+def _judge_lines(draft: pipeline.Draft, number: int) -> list[str]:
+    c = draft.checks
+    lines = [f"    draft {number}"]
+    if draft.review is None:
+        lines.append("    judge refused: counted as unsafe")
+    else:
+        r = draft.review
+        lines.append("    scores: " + ", ".join(f"{name} {s.score}" for name, s in r.scores().items()))
+        missing = judge.missing_steps(r)
+        lines.append(f"    story circle: {'all 8 steps' if not missing else 'missing ' + ', '.join(missing)}")
+        lines.append(f"    safe: {r.safe}" + (f" ({r.safety_issue})" if r.safety_issue else ""))
+    lines.append(f"    checks: {c.word_count}/{c.target_words} words, FK grade {c.fk_grade} "
+                 f"(target <= {judge.READABILITY_TARGETS[c.band]:.0f}), "
+                 f"moralizing {c.moralizing or 'none'}, banned {c.banned or 'none'}")
+    outcome = "PASS" if draft.passed else "fails rubric (hard gates ok)" if draft.gated else "FAILS hard gates"
+    lines.append(f"    result: {outcome}")
+    return lines
+
+
+# --------------------------------------------------------------------------- #
+# Entry point
+# --------------------------------------------------------------------------- #
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Tell a bedtime story for ages 5-10.")
+    parser.add_argument("--verbose", action="store_true",
+                        help="print classification, plan, judge scores, checks and token usage")
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
     try:
         request = ask_request()
         age = ask_number("How old is the listener?", 5, 10, pipeline.DEFAULT_AGE)
         words = ask_number("How many words?", guardrails.MIN_WORDS, guardrails.MAX_WORDS, pipeline.DEFAULT_WORDS)
-        print("Writing your story...")
-        run_story(request, age, words)
+        run_story(request, age, words, verbose=args.verbose)
         return 0
     except KeyboardInterrupt:
         print("\nGoodnight!")
