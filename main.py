@@ -66,7 +66,7 @@ def run_story(request: str, age: int, target_words: int, *, verbose: bool = Fals
                 print(chunk["status"])
             elif verbose:
                 for node, update in chunk.items():
-                    if node != "__interrupt__" and update:
+                    if node not in _UNTRACED and update:
                         print("\n".join(trace_lines(node, update)))
         snapshot = graph.get_state(config)
         if not snapshot.interrupts:
@@ -105,12 +105,19 @@ def answer_interrupt(payload: dict[str, Any]) -> str:
 # --------------------------------------------------------------------------- #
 
 
+# Interrupt nodes only record the user's reply, which the user just typed.
+_UNTRACED = frozenset({"__interrupt__", "ask_ingredients", "decline", "ask_edit"})
+
+
 def trace_lines(node: str, update: dict[str, Any]) -> list[str]:
     """Readable trace lines for one node's state update."""
     lines = [f"  [{node}]"]
     if node in ("intake", "edit_intake") and "verdict" in update:
-        lines.append(f"    verdict: {update['verdict']}  category: {update.get('category', '-')}  "
-                     f"blocked: {update.get('blocked_category', '-')}")
+        if node == "intake":
+            lines.append(f"    verdict: {update['verdict']}  category: {update['category']}  "
+                         f"blocked: {update['blocked_category']}")
+        else:
+            lines.append(f"    verdict: {update['verdict']}")
         if update.get("ingredients") is not None:
             lines.append(f"    ingredients: {update['ingredients'].model_dump()}")
         if update.get("extras"):
@@ -128,7 +135,10 @@ def trace_lines(node: str, update: dict[str, Any]) -> list[str]:
             lines.append(f"    {beat.step:<7} {beat.word_budget:>3}w  {beat.summary}")
     elif node in ("storyteller", "reviser") and "candidate" in update:
         if update["candidate"]:
-            round_ = f" (revision {update['revision_count']})" if node == "reviser" else ""
+            round_ = ""
+            if node == "reviser":
+                count = update["revision_count"]
+                round_ = f" (revision {count})" if count else " (the requested change)"
             lines.append(f"    wrote a draft of {judge.word_count(update['candidate'])} words{round_}")
         else:
             lines.append("    declined to write; stopping revisions")
