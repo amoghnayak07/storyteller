@@ -36,6 +36,7 @@ from schemas import (
     BlockedCategory,
     Category,
     EditIntake,
+    IngredientName,
     Ingredients,
     IntakeResult,
     Verdict,
@@ -65,7 +66,7 @@ _INJECTION_PATTERNS: tuple[str, ...] = (
     r"\bjailbreak",
     r"\bDAN\s+mode\b",
     r"</?\s*(system|assistant|user_request|user_edit|known_ingredients|known_category"
-    r"|current_ingredients|current_target_words|prefilter_flag|draft)\s*>",
+    r"|current_ingredients|current_target_words|prefilter_flag|asked_for|draft)\s*>",
 )
 
 # Obvious blocked content. Each pattern is matched case-insensitively on word
@@ -205,12 +206,14 @@ def screen_request(
     *,
     known_ingredients: Ingredients | None = None,
     known_category: Category | None = None,
+    asked_for: list[IngredientName] | None = None,
 ) -> RequestScreening:
     """Screen a story request, or an answer to the ingredient question.
 
     Pass ``known_ingredients`` (and ``known_category``) when the user is
     answering the ingredient question; values the answer leaves empty are
-    kept from what we already had.
+    kept from what we already had. ``asked_for`` names the ingredients we just
+    asked about, so a bare answer like "friendship" lands in the right slot.
     """
     known = known_ingredients or _empty_ingredients()
     flag = prefilter(text)
@@ -231,6 +234,8 @@ def screen_request(
         parts.append(prompts.tag("known_ingredients", _ingredients_json(known_ingredients)))
     if known_category is not None:
         parts.append(prompts.tag("known_category", known_category))
+    if asked_for:
+        parts.append(prompts.tag("asked_for", ", ".join(asked_for)))
     if flag:
         parts.append(prompts.tag("prefilter_flag", flag.category))
     parts.append(prompts.tag("user_request", text))
@@ -361,7 +366,9 @@ def _declined_edit(
 # --------------------------------------------------------------------------- #
 
 _YOU_PICK_RE = re.compile(
-    r"^(you\s*pick|you\s*choose|surprise\s*me|anything|whatever|any|dunno|i\s*don'?t\s*know)[.!]*$",
+    r"^(you\s*pick|you\s*choose|surprise\s*me|anything|whatever|any|dunno|i\s*don'?t\s*know"
+    r"|random|doesn'?t\s*matter|does\s*not\s*matter|no\s*preference|up\s*to\s*you|your\s*choice"
+    r"|i\s*don'?t\s*care)[.!]*$",
     re.IGNORECASE,
 )
 
