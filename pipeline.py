@@ -4,6 +4,8 @@ Flow (branch 3; the judge loop and the edit interrupt come next)::
 
     START -> intake --story, complete--> planner -> storyteller -> finish -> END
                |  \\--story, missing----> ask_ingredients (interrupt) --> intake
+               |                               (two answers in a row that fill nothing new:
+               |                                intake picks the rest and goes on to the planner)
                |                               \\--blank answer: "you pick" all --> planner
                \\--off_task/blocked/public_figure--> decline (interrupt)
                                                     |-- "y": the suggestion --> intake
@@ -54,6 +56,9 @@ DEFAULT_WORDS = 500
 # Fallback beat weights (percent) used when the planner's budgets are unusable.
 _DEFAULT_WEIGHTS = (8, 8, 10, 18, 16, 16, 10, 14)
 
+MAX_FRUITLESS_ANSWERS = 2
+PICK_THE_REST_NOTE = "No worries, I'll pick the rest!"
+
 _QUIT_WORDS = frozenset({"q", "quit", "exit", "no", "n", "bye"})
 _ACCEPT_WORDS = frozenset({"y", "yes", "yeah", "yep", "ok", "okay", "sure"})
 
@@ -89,6 +94,11 @@ class StoryState(TypedDict, total=False):
     category: Category
     ingredients: Ingredients | None
     extras: list[str]
+    asked_for: list[IngredientName]
+    fruitless_answers: int
+    """Consecutive ingredient answers that filled nothing new."""
+    notes: list[str]
+    """One-line notes shown to the user with the story."""
 
     # Writing.
     plan: StoryPlan
@@ -115,6 +125,9 @@ def initial_state(request: str, age: int = DEFAULT_AGE, target_words: int = DEFA
         "pending_text": request,
         "ingredients": None,
         "extras": [],
+        "asked_for": [],
+        "fruitless_answers": 0,
+        "notes": [],
         "drafts": [],
         "usage": llm.Usage(),
     }
@@ -133,17 +146,33 @@ def intake(state: StoryState) -> dict[str, Any]:
         state["pending_text"],
         known_ingredients=known,
         known_category=state.get("category") if answering else None,
+        asked_for=state.get("asked_for") if answering else None,
     )
     r = screening.result
     extras = _dedupe((state.get("extras", []) if answering else []) + r.extra_elements)
+    ingredients = r.ingredients
+    notes = list(state.get("notes", [])) if answering else []
+
+    # An answer that fills nothing new gets one more ask; after the second,
+    # stop asking and let the planner pick the rest.
+    fruitless = 0
+    if answering and r.verdict == "story":
+        made_progress = len(ingredients.missing()) < len(known.missing())
+        fruitless = 0 if made_progress else state.get("fruitless_answers", 0) + 1
+        if fruitless >= MAX_FRUITLESS_ANSWERS and ingredients.missing():
+            ingredients = ingredients.model_copy(update={name: YOU_PICK for name in ingredients.missing()})
+            notes.append(PICK_THE_REST_NOTE)
+
     return {
         "verdict": r.verdict,
         "blocked_category": r.blocked_category,
         "suggestion": r.suggestion,
         "message": screening.message,
         "category": r.category,
-        "ingredients": r.ingredients,
+        "ingredients": ingredients,
         "extras": extras,
+        "fruitless_answers": fruitless,
+        "notes": notes,
         "usage": screening.usage,
     }
 
@@ -152,13 +181,14 @@ def ask_ingredients(state: StoryState) -> dict[str, Any]:
     """Interrupt: ask for every missing ingredient in one friendly message."""
     ingredients = state["ingredients"]
     missing = ingredients.missing()
-    answer = interrupt({"kind": "ingredients", "message": ingredient_question(missing), "missing": missing})
+    question = ingredient_question(missing, again=bool(state.get("asked_for")))
+    answer = interrupt({"kind": "ingredients", "message": question, "missing": missing})
     answer = str(answer).strip()
     if not answer:
         # A blank reply means "you pick" for everything still missing.
         filled = ingredients.model_copy(update={name: YOU_PICK for name in missing})
         return {"ingredients": filled, "pending_text": ""}
-    return {"pending_text": answer}
+    return {"pending_text": answer, "asked_for": missing}
 
 
 def decline(state: StoryState) -> dict[str, Any]:
@@ -177,6 +207,8 @@ def decline(state: StoryState) -> dict[str, Any]:
         "pending_text": reply,
         "ingredients": None,
         "extras": [],
+        "asked_for": [],
+        "fruitless_answers": 0,
     }
 
 
@@ -301,14 +333,15 @@ def build_graph(checkpointer: Any = None) -> Any:
 _QUESTIONS: dict[IngredientName, str] = {
     "character": "Who is the story about?",
     "setting": "Where does it happen?",
-    "background": "What is their everyday life like when the story starts?",
+    "background": "What's going on when the story begins? (like \"Bob has never left the garden\")",
     "moral": "What should the story be about underneath, like sharing or being brave?",
 }
 
 
-def ingredient_question(missing: list[IngredientName]) -> str:
+def ingredient_question(missing: list[IngredientName], *, again: bool = False) -> str:
     """One friendly message asking for every missing ingredient."""
-    lines = ["Ooh, I like it! A few quick questions before I start:"]
+    opener = "Almost there! Just tell me:" if again else "Ooh, I like it! A few quick questions before I start:"
+    lines = [opener]
     lines += [f"  - {_QUESTIONS[name]}" for name in INGREDIENT_NAMES if name in missing]
     lines.append('Answer any or all of them. Say "you pick" for anything you want me to choose, '
                  "or just press Enter and I'll pick them all.")

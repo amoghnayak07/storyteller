@@ -221,12 +221,59 @@ def test_missing_ingredients_interrupt_then_answer_is_screened_with_known_values
     assert len(client.messages.calls) == 4
 
 
-def test_ingredients_are_asked_again_until_complete(fake_client, graph, thread):
+def test_answer_turn_names_the_ingredients_we_asked_for(fake_client, graph, thread):
+    partial = {"character": "Alice and Bob the cat", "setting": "school", "background": "", "moral": ""}
+    client = fake_client(msg(intake_json(ingredients=partial)), msg(intake_json(ingredients=partial)))
+    run(graph, pipeline.initial_state("Alice and Bob", 7, 500), thread)
+    run(graph, Command(resume="friendship"), thread)
+    assert "<asked_for>\nbackground, moral\n</asked_for>" in user_turn(client.messages.calls[1])
+    assert "<asked_for>" not in user_turn(client.messages.calls[0])
+
+
+def test_first_fruitless_answer_asks_again_with_a_follow_up_opener(fake_client, graph, thread):
     partial = {"character": "a shy dragon", "setting": "", "background": "", "moral": ""}
     fake_client(msg(intake_json(ingredients=partial)), msg(intake_json(ingredients=partial)))
-    run(graph, pipeline.initial_state("a shy dragon", 7, 500), thread)
+    first = run(graph, pipeline.initial_state("a shy dragon", 7, 500), thread)
+    assert first["__interrupt__"][0].value["message"].startswith("Ooh, I like it!")
+
     result = run(graph, Command(resume="hmm"), thread)
-    assert result["__interrupt__"][0].value["kind"] == "ingredients"
+    payload = result["__interrupt__"][0].value
+    assert payload["kind"] == "ingredients"
+    assert payload["message"].startswith("Almost there!")
+
+
+def test_second_fruitless_answer_picks_the_rest(fake_client, graph, thread):
+    partial = {"character": "a shy dragon", "setting": "", "background": "", "moral": ""}
+    client = fake_client(
+        msg(intake_json(ingredients=partial)),
+        msg(intake_json(ingredients=partial)),
+        msg(intake_json(ingredients=partial)),
+        msg(plan_json()),
+        msg(STORY),
+    )
+    run(graph, pipeline.initial_state("a shy dragon", 7, 500), thread)
+    run(graph, Command(resume="hmm"), thread)
+    result = run(graph, Command(resume="no idea really"), thread)
+
+    assert result["final_story"] == STORY
+    assert result["notes"] == [pipeline.PICK_THE_REST_NOTE]
+    assert user_turn(client.messages.calls[3]).count(YOU_PICK) == 3
+
+
+def test_progress_resets_the_fruitless_count(fake_client, graph, thread):
+    empty = {"character": "a shy dragon", "setting": "", "background": "", "moral": ""}
+    some = {**empty, "setting": "a cloud castle"}
+    fake_client(
+        msg(intake_json(ingredients=empty)),
+        msg(intake_json(ingredients=empty)),   # fruitless 1
+        msg(intake_json(ingredients=some)),    # progress -> 0
+        msg(intake_json(ingredients=some)),    # fruitless 1 -> ask again
+    )
+    run(graph, pipeline.initial_state("a shy dragon", 7, 500), thread)
+    run(graph, Command(resume="hmm"), thread)
+    run(graph, Command(resume="a cloud castle"), thread)
+    result = run(graph, Command(resume="hmm"), thread)
+    assert result["__interrupt__"][0].value["missing"] == ["background", "moral"]
 
 
 def test_blank_ingredient_answer_delegates_everything_without_another_intake_call(fake_client, graph, thread):

@@ -65,6 +65,8 @@ def run_story(request: str, age: int, target_words: int) -> None:
     if not story:
         print("\nOkay, sweet dreams!")
         return
+    for note in result.get("notes", []):
+        print(f"\n{note}")
     print()
     print(result["plan"].title)
     print()
