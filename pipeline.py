@@ -80,6 +80,12 @@ PICK_THE_REST_NOTE = "No worries, I'll pick the rest!"
 
 MAX_REVISIONS = 3
 
+# The writers overshoot long targets (an 800-word target gave drafts of 815-926
+# words in the evals), and 800 is a hard cap with no tolerance. So the plan,
+# the writers, the judge and the length feedback all aim at most this high,
+# while the user's own number stays in ``target_words``.
+WRITE_CAP = 760
+
 APOLOGY = (
     "I'm sorry, I couldn't get that story just right for bedtime. "
     "Could you try a different idea?"
@@ -178,6 +184,8 @@ class StoryState(TypedDict, total=False):
     final_story: str
     final_plan: StoryPlan
     """The plan behind ``final_story``; restored if an edit fails."""
+    final_target_words: int
+    """The user's target behind ``final_story``; restored if an edit fails."""
     story_fresh: bool
     """True from ``finish`` until the edit interrupt has shown the story."""
     apology: str
@@ -186,6 +194,11 @@ class StoryState(TypedDict, total=False):
     edit_history: list[str]
     edit_message: str
     usage: Annotated[llm.Usage, operator.add]
+
+
+def writing_target(target_words: int) -> int:
+    """The length the writers aim for: the user's target, capped at ``WRITE_CAP``."""
+    return min(target_words, WRITE_CAP)
 
 
 def band_for_age(age: int) -> AgeBand:
@@ -309,6 +322,7 @@ def decline(state: StoryState) -> dict[str, Any]:
 
 def planner(state: StoryState) -> dict[str, Any]:
     _status("planner")
+    aim = writing_target(state["target_words"])
     parts = [
         prompts.tag("user_request", state["request"]),
         prompts.tag("ingredients", json.dumps(state["ingredients"].model_dump(), indent=2)),
@@ -319,13 +333,13 @@ def planner(state: StoryState) -> dict[str, Any]:
     parts += [
         prompts.tag("category", state["category"]),
         prompts.tag("age_band", state["band"]),
-        prompts.tag("target_words", str(state["target_words"])),
+        prompts.tag("target_words", str(aim)),
     ]
     try:
         call = llm.generate_structured(prompts.PLANNER_SYSTEM, "\n\n".join(parts), StoryPlan, effort="medium")
     except llm.LLMRefusalError:
         return _refused()
-    plan = call.value.model_copy(update={"beats": rescale_budgets(call.value.beats, state["target_words"])})
+    plan = call.value.model_copy(update={"beats": rescale_budgets(call.value.beats, aim)})
     return {"plan": plan, "usage": call.usage}
 
 
@@ -336,7 +350,7 @@ def storyteller(state: StoryState) -> dict[str, Any]:
             prompts.tag("story_plan", plan_json(state["plan"])),
             prompts.tag("category", state["category"]),
             prompts.tag("age_band", state["band"]),
-            prompts.tag("target_words", str(state["target_words"])),
+            prompts.tag("target_words", str(writing_target(state["target_words"]))),
         ]
     )
     try:
@@ -350,7 +364,8 @@ def judge_draft(state: StoryState) -> dict[str, Any]:
     """Grade the candidate: code checks plus the LLM judge. A judge refusal counts as unsafe."""
     _status("judge")
     text = state["candidate"]
-    checks = judge.run_checks(text, state["band"], state["target_words"])
+    aim = writing_target(state["target_words"])
+    checks = judge.run_checks(text, state["band"], aim)
     review: JudgeResult | None = None
     usage = llm.Usage()
     try:
@@ -360,7 +375,7 @@ def judge_draft(state: StoryState) -> dict[str, Any]:
             ingredients=state["ingredients"],
             extras=state.get("extras", []),
             band=state["band"],
-            target_words=state["target_words"],
+            target_words=aim,
             edit_requests=state.get("edit_history", []),
         )
         review, usage = call.value, call.usage
@@ -390,7 +405,7 @@ def reviser(state: StoryState) -> dict[str, Any]:
     parts += [
         prompts.tag("category", state["category"]),
         prompts.tag("age_band", state["band"]),
-        prompts.tag("target_words", str(state["target_words"])),
+        prompts.tag("target_words", str(writing_target(state["target_words"]))),
     ]
     count = state.get("revision_count", 0) + (1 if drafts else 0)
     try:
@@ -414,6 +429,7 @@ def finish(state: StoryState) -> dict[str, Any]:
         return {
             "final_story": best.text,
             "final_plan": state["plan"],
+            "final_target_words": state["target_words"],
             "story_fresh": True,
             "edit_message": "",
             "suggestion": "",
@@ -424,7 +440,7 @@ def finish(state: StoryState) -> dict[str, Any]:
         return {
             "plan": plan,
             "ingredients": plan.ingredients,
-            "target_words": sum(beat.word_budget for beat in plan.beats),
+            "target_words": state["final_target_words"],
             "edit_history": state.get("edit_history", [])[:-1],
             "story_fresh": False,
             "edit_message": EDIT_APOLOGY,
@@ -482,7 +498,7 @@ def edit_intake(state: StoryState) -> dict[str, Any]:
         }
     target = screening.target_words
     if target != state["target_words"]:
-        plan = plan.model_copy(update={"beats": rescale_budgets(plan.beats, target)})
+        plan = plan.model_copy(update={"beats": rescale_budgets(plan.beats, writing_target(target))})
     return {
         "verdict": "story",
         "edit_kind": r.edit_kind,

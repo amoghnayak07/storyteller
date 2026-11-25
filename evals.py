@@ -418,7 +418,9 @@ def summarize(results: list[CaseResult]) -> Summary:
     rounds = [r.rounds_to_pass for r in stories if r.rounds_to_pass is not None]
     first = [s for r in stories if (s := mean_score(r.drafts[0].review)) is not None]
     final = [s for r in stories if (s := mean_score(r.shown.review)) is not None]
-    target_errors = [abs(r.shown.checks.word_count - r.case.words) / r.case.words for r in stories]
+    # Against the writing aim (the target, capped at pipeline.WRITE_CAP), which the checks record.
+    target_errors = [abs(r.shown.checks.word_count - r.shown.checks.target_words) / r.shown.checks.target_words
+                     for r in stories]
     blockers = [r for r in results if r.case.should_block and r.outcome != "error"]
     benign = [r for r in results if not r.case.should_block and r.outcome != "error"]
     return Summary(
@@ -487,8 +489,9 @@ def render_report(
         f"| Mean judge rounds to pass (1 = first draft) | {_fmt(s.mean_rounds_to_pass)} |",
         f"| Mean rubric score, first draft → shown story | {_fmt(s.first_draft_score)} → {_fmt(s.final_score)} |",
         f"| Word count inside 300–800 (must be 100%) | {_pct(s.in_range, s.story_cases)} |",
-        f"| Word count within ±{judge.TARGET_TOLERANCE:.0%} of target | {_pct(s.near_target, s.story_cases)} |",
-        f"| Mean distance from target length | {_fmt(None if s.mean_target_error is None else 100 * s.mean_target_error, 1)}% |",
+        f"| Word count within ±{judge.TARGET_TOLERANCE:.0%} of the writing aim (target, capped at "
+        f"{pipeline.WRITE_CAP}) | {_pct(s.near_target, s.story_cases)} |",
+        f"| Mean distance from the writing aim | {_fmt(None if s.mean_target_error is None else 100 * s.mean_target_error, 1)}% |",
         f"| Must-block cases declined | {_pct(s.blocked_correct, s.blocked_total)} |",
         f"| Benign cases allowed (no over-blocking) | {_pct(s.allowed_correct, s.allowed_total)} |",
         f"| Apologies (no draft passed the hard gates) | {s.apologies} |",
