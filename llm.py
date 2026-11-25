@@ -8,7 +8,7 @@ Every node in the pipeline goes through one of two functions:
 
 Design notes
 ------------
-- **Model**: ``claude-haiku-5-5`` for every call, as directed by the hiring team.
+- **Model**: ``claude-haiku-5-5`` for every call.
 - **No sampling parameters.** Haiku 5.5 does not accept ``temperature`` /
   ``top_p`` / ``top_k``. Nodes are differentiated by their prompt and by
   ``effort`` (e.g. the judge runs at ``high``), not by temperature.
