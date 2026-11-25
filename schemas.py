@@ -148,7 +148,13 @@ class EditIntake(_Strict):
     """The edit restated as one clear instruction for the reviser."""
     new_target_words: int
     """Requested new length, or 0 if the edit does not change length."""
+    drops_story_step: bool
+    """True if the edit asks to cut a part every story needs (e.g. "remove the sad
+    part"). The instruction then softens that part instead of removing it."""
+    asks_age_change: bool
+    """True if the edit asks to retell the story for a different age."""
     suggestion: str
+    """A related, safe alternative edit. Empty unless verdict is blocked/public_figure."""
 
 
 # --------------------------------------------------------------------------- #
