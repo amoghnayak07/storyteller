@@ -73,7 +73,7 @@ DEFAULT_AGE = 7
 DEFAULT_WORDS = 500
 
 # Fallback beat weights (percent) used when the planner's budgets are unusable.
-_DEFAULT_WEIGHTS = (8, 8, 10, 18, 16, 16, 10, 14)
+_DEFAULT_WEIGHTS = (15, 10, 40, 15, 20)
 
 MAX_FRUITLESS_ANSWERS = 2
 PICK_THE_REST_NOTE = "No worries, I'll pick the rest!"

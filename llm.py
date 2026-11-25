@@ -163,7 +163,7 @@ def generate_structured(
     """Generation constrained to ``schema``. Retries once on malformed output.
 
     The API guarantees the JSON matches the schema's *shape*; Pydantic then
-    enforces the rules the grammar can't express (e.g. "exactly 8 beats").
+    enforces the rules the grammar can't express (e.g. "exactly 5 beats").
     """
     usage = Usage()
     for _ in range(MAX_ATTEMPTS):

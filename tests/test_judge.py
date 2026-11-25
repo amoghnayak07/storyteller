@@ -15,7 +15,7 @@ ALICE = Ingredients(character="Alice", setting="the garden", background=YOU_PICK
 def review(score=5, safe=True, missing=()) -> JudgeResult:
     criterion = CriterionScore(score=score, evidence="q", fix="" if score == 5 else "do better")
     return JudgeResult(
-        story_circle=[StepCheck(step=s, present=s not in missing, evidence="q") for s in STORY_STEPS],
+        formula_steps=[StepCheck(step=s, present=s not in missing, evidence="q") for s in STORY_STEPS],
         **{name: criterion for name in SCORED_CRITERIA},
         safe=safe,
         safety_issue="" if safe else "a monster eats a cat",
@@ -150,7 +150,7 @@ def test_hard_gates(result, c):
 
 
 def test_low_score_or_missing_step_fails_but_passes_the_hard_gates():
-    for result in (review(score=3), review(missing=("take",))):
+    for result in (review(score=3), review(missing=("middle",))):
         assert judge.passes_hard_gates(result, checks())
         assert not judge.passes(result, checks())
 
@@ -163,7 +163,7 @@ def test_rank_prefers_gated_then_passing_then_steps_then_scores():
     ordered = [
         (None, checks()),
         (review(score=5), checks(words=200)),
-        (review(score=3, missing=("take", "go")), checks()),
+        (review(score=3, missing=("middle", "wind_down")), checks()),
         (review(score=2), checks()),
         (review(score=3), checks()),
         (review(score=4), checks(words=700)),
@@ -174,9 +174,9 @@ def test_rank_prefers_gated_then_passing_then_steps_then_scores():
 
 
 def test_revision_notes_cover_safety_steps_scores_and_checks():
-    notes = judge.revision_notes(review(score=3, safe=False, missing=("take",)), checks(words=250))
+    notes = judge.revision_notes(review(score=3, safe=False, missing=("wind_down",)), checks(words=250))
     assert notes[0].startswith("Safety: a monster eats a cat")
-    assert any("'take' step" in n for n in notes)
+    assert any("'wind_down' step" in n for n in notes)
     assert sum("(scored 3/5): do better" in n for n in notes) == len(SCORED_CRITERIA)
     assert notes[-1].startswith("Length:")
 
@@ -227,7 +227,7 @@ def test_judge_turn_includes_edit_requests_when_present():
 
 @pytest.mark.parametrize("system", [prompts.JUDGE_SYSTEM, prompts.REVISER_SYSTEM])
 def test_judge_and_reviser_prompts_reuse_the_craft_blocks(system):
-    assert prompts.STORY_CIRCLE in system
+    assert prompts.BEDTIME_FORMULA in system
     assert prompts.AGE_BANDS in system
     assert "never an" in system and "instruction" in system
     assert len(system) > 4 * 1024  # over the 512-token cache minimum

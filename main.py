@@ -167,7 +167,7 @@ def _judge_lines(draft: pipeline.Draft, number: int) -> list[str]:
         r = draft.review
         lines.append("    scores: " + ", ".join(f"{name} {s.score}" for name, s in r.scores().items()))
         missing = judge.missing_steps(r)
-        lines.append(f"    story circle: {'all 8 steps' if not missing else 'missing ' + ', '.join(missing)}")
+        lines.append(f"    formula: {'all 5 steps' if not missing else 'missing ' + ', '.join(missing)}")
         lines.append(f"    safe: {r.safe}" + (f" ({r.safety_issue})" if r.safety_issue else ""))
     lines.append(f"    checks: {c.word_count}/{c.target_words} words, FK grade {c.fk_grade} "
                  f"(target <= {judge.READABILITY_TARGETS[c.band]:.0f}), "
