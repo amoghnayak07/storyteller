@@ -1,16 +1,28 @@
 """
 Before submitting the assignment, describe here in a few sentences what you would have built next if you spent 2 more hours on this project:
 
+First, an interactive terminal UI with --age and --words flags, so a parent can
+pick options and re-run a story without retyping three answers. Second, a
+durable checkpointer (LangGraph's SqliteSaver in place of InMemorySaver), so a
+story and its edit history survive a restart and can be resumed by thread id.
+Third, a length floor that mirrors WRITE_CAP: the evals show the writers can
+undershoot short targets (a 350-word aim produced a 247-word first draft), so a
+300-word target should aim slightly higher. Last, more evals: multi-turn
+injection attempts hidden inside edit requests, and a small set of stories
+rated by people, so the judge is calibrated against humans and not only
+checked for self-consistency.
 """
 
 # The CLI is a thin driver: it collects the request, age and length, runs the
 # graph in pipeline.py, prints the progress lines the nodes stream, and answers
-# each interrupt with what the user types. --verbose adds a trace of every node.
+# each interrupt with what the user types. --verbose adds a trace of every node;
+# --diagram prints the graph's Mermaid topology and exits without an API call.
 
 from __future__ import annotations
 
 import argparse
 import sys
+import time
 import uuid
 from typing import Any
 
@@ -91,13 +103,43 @@ def answer_interrupt(payload: dict[str, Any]) -> str:
             print()
         print(payload["title"])
         print()
-        print(payload["story"])
+        typewrite(payload["story"])
         print()
     print(payload["message"])
     if payload["kind"] == "decline":
         hint = 'Type "y" to hear that one, ' if payload.get("suggestion") else "Type "
         print(f"{hint}a new idea, or press Enter to stop.")
     return ask("> ")
+
+
+# Seconds per word for the typewriter replay.
+TYPEWRITER_DELAY = 0.03
+
+
+def typewrite(text: str, *, delay: float = TYPEWRITER_DELAY) -> None:
+    """Replay an approved story word by word, like it is being told.
+
+    Only stories that already passed the gates reach here, so nothing unjudged
+    is ever streamed. When output is not a terminal (piped, or under tests) the
+    story prints at once.
+    """
+    if not sys.stdout.isatty() or delay <= 0:
+        print(text)
+        return
+    for line in text.split("\n"):
+        words = line.split(" ")
+        for i, word in enumerate(words):
+            sys.stdout.write(word + (" " if i < len(words) - 1 else ""))
+            sys.stdout.flush()
+            if word:
+                time.sleep(delay)
+        sys.stdout.write("\n")
+    sys.stdout.flush()
+
+
+def print_diagram() -> None:
+    """Print the compiled graph's topology as Mermaid (no API key needed)."""
+    print(pipeline.build_graph().get_graph().draw_mermaid())
 
 
 # --------------------------------------------------------------------------- #
@@ -186,11 +228,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Tell a bedtime story for ages 5-10.")
     parser.add_argument("--verbose", action="store_true",
                         help="print classification, plan, judge scores, checks and token usage")
+    parser.add_argument("--diagram", action="store_true",
+                        help="print the LangGraph topology as Mermaid and exit")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.diagram:
+        print_diagram()
+        return 0
     try:
         request = ask_request()
         age = ask_number("How old is the listener?", 5, 10, pipeline.DEFAULT_AGE)
