@@ -1,6 +1,16 @@
 """
 Before submitting the assignment, describe here in a few sentences what you would have built next if you spent 2 more hours on this project:
 
+First, an interactive terminal UI with --age and --words flags, so a parent can
+pick options and re-run a story without retyping three answers. Second, a
+durable checkpointer (LangGraph's SqliteSaver in place of InMemorySaver), so a
+story and its edit history survive a restart and can be resumed by thread id.
+Third, a length floor that mirrors WRITE_CAP: the evals show the writers can
+undershoot short targets (a 350-word aim produced a 247-word first draft), so a
+300-word target should aim slightly higher. Last, more evals: multi-turn
+injection attempts hidden inside edit requests, and a small set of stories
+rated by people, so the judge is calibrated against humans and not only
+checked for self-consistency.
 """
 
 # The CLI is a thin driver: it collects the request, age and length, runs the
