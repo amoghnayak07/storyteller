@@ -6,7 +6,7 @@ Usage::
     .venv\\Scripts\\python.exe evals.py --only vague dragons
     .venv\\Scripts\\python.exe evals.py --skip-baseline --skip-consistency
 
-Three parts (PLAN.md, "Evals"):
+Three parts (Submission.md, "Evaluation"):
 
 1. **Pipeline cases.** About 15 requests run through the real graph. The
    interrupts are answered automatically: "you pick" for missing ingredients,
@@ -40,27 +40,27 @@ import judge
 import llm
 import pipeline
 import prompts
-from schemas import SCORED_CRITERIA, Ingredients, JudgeResult
+from constants import (
+    CONSISTENCY_REPEATS,
+    CONSISTENCY_STORIES,
+    DEFAULT_AGE,
+    DEFAULT_WORDS,
+    LARGE_SPREAD,
+    MAX_EVAL_INTERRUPTS,
+    MAX_WORDS,
+    MIN_WORDS,
+    MODEL,
+    PRICE_CACHE_READ,
+    PRICE_CACHE_WRITE,
+    PRICE_IN,
+    PRICE_OUT,
+    TARGET_TOLERANCE,
+    WRITE_CAP,
+)
+from schemas import SCORED_CRITERIA, STORY_STEPS, Ingredients, JudgeResult
 
 Group = Literal["normal", "vague", "many", "extreme", "must_block", "must_allow"]
 Outcome = Literal["story", "declined", "apology", "error"]
-
-# Haiku 5.5, USD per million tokens (prompts under 100K tokens). Cache writes
-# cost 1.25x input and cache reads 0.1x.
-PRICE_IN = 0.10
-PRICE_OUT = 0.50
-PRICE_CACHE_WRITE = PRICE_IN * 1.25
-PRICE_CACHE_READ = PRICE_IN * 0.1
-
-CONSISTENCY_STORIES = 3
-CONSISTENCY_REPEATS = 5
-# A per-criterion range this large means one judgement isn't reliable enough,
-# and the pipeline should take the median of 3 judgements instead.
-LARGE_SPREAD = 2
-
-# A run needs at most: ingredients (twice), then the edit prompt. Anything
-# beyond this means the auto-answers are looping.
-_MAX_INTERRUPTS = 6
 
 
 @dataclass(frozen=True)
@@ -68,8 +68,8 @@ class Case:
     name: str
     group: Group
     request: str
-    age: int = pipeline.DEFAULT_AGE
-    words: int = pipeline.DEFAULT_WORDS
+    age: int = DEFAULT_AGE
+    words: int = DEFAULT_WORDS
     category: str = ""
     """The category we expect intake to pick (normal cases only; informational)."""
 
@@ -197,7 +197,7 @@ def draft_verdict(draft: pipeline.Draft) -> str:
     c, review = draft.checks, draft.review
     reasons = []
     if not c.in_range:
-        reasons.append("outside 300-800")
+        reasons.append(f"outside {MIN_WORDS}-{MAX_WORDS}")
     if review is None:
         reasons.append("judge refused (unsafe)")
     elif not review.safe:
@@ -247,7 +247,7 @@ def run_case(case: Case) -> CaseResult:
             interrupts.append(payload["kind"])
             if payload["kind"] == "decline" and not declined_message:
                 declined_message = payload["message"]
-            if len(interrupts) > _MAX_INTERRUPTS:
+            if len(interrupts) > MAX_EVAL_INTERRUPTS:
                 raise RuntimeError(f"too many interrupts: {interrupts}")
             command = Command(resume=auto_answer(payload))
     except Exception as exc:  # one bad case must not sink the whole run
@@ -281,6 +281,7 @@ def run_case(case: Case) -> CaseResult:
 
 
 def baseline_user_turn(case: Case) -> str:
+    """The baseline's user turn: just the request, age and target, tagged."""
     return "\n\n".join(
         [
             prompts.tag("user_request", case.request),
@@ -329,7 +330,7 @@ def run_consistency(result: CaseResult, repeats: int = CONSISTENCY_REPEATS) -> C
         for name, c in review.scores().items():
             out.scores[name].append(c.score)
         out.safe.append(review.safe)
-        out.steps_present.append(len(judge.STORY_STEPS) - len(judge.missing_steps(review)))
+        out.steps_present.append(len(STORY_STEPS) - len(judge.missing_steps(review)))
     return out
 
 
@@ -368,6 +369,7 @@ def parallel_map(fn: Callable[[T], R], items: list[T], workers: int, label: str)
 
 
 def cost_usd(usage: llm.Usage) -> float:
+    """Dollar cost of the tokens in ``usage`` at Haiku 5.5 prices."""
     return (
         usage.input_tokens * PRICE_IN
         + usage.output_tokens * PRICE_OUT
@@ -383,6 +385,7 @@ def cache_hit_rate(usage: llm.Usage) -> float:
 
 
 def total_usage(items: list[Any]) -> llm.Usage:
+    """Sum the ``usage`` of any results that carry one."""
     total = llm.Usage()
     for item in items:
         total += item.usage
@@ -414,11 +417,12 @@ class Summary:
 
 
 def summarize(results: list[CaseResult]) -> Summary:
+    """The headline metrics over all pipeline cases."""
     stories = [r for r in results if r.outcome == "story" and r.shown is not None]
     rounds = [r.rounds_to_pass for r in stories if r.rounds_to_pass is not None]
     first = [s for r in stories if (s := mean_score(r.drafts[0].review)) is not None]
     final = [s for r in stories if (s := mean_score(r.shown.review)) is not None]
-    # Against the writing aim (the target, capped at pipeline.WRITE_CAP), which the checks record.
+    # Against the writing aim (the target, capped at WRITE_CAP), which the checks record.
     target_errors = [abs(r.shown.checks.word_count - r.shown.checks.target_words) / r.shown.checks.target_words
                      for r in stories]
     blockers = [r for r in results if r.case.should_block and r.outcome != "error"]
@@ -467,13 +471,14 @@ def render_report(
     *,
     seconds: float,
 ) -> str:
+    """The whole Markdown report for ``eval_results.md``."""
     s = summarize(results)
     everything = total_usage(results) + total_usage(baselines) + total_usage(consistency)
     pipeline_usage = total_usage(results)
     lines: list[str] = [
         "# Eval results",
         "",
-        f"Generated by `evals.py` on {datetime.now():%Y-%m-%d %H:%M}, model `{llm.MODEL}` for every call. "
+        f"Generated by `evals.py` on {datetime.now():%Y-%m-%d %H:%M}, model `{MODEL}` for every call. "
         f"{len(results)} pipeline cases, {len(baselines)} baseline stories, "
         f"{len(consistency)} judge-consistency stories; {seconds / 60:.1f} minutes wall time.",
         "",
@@ -488,9 +493,9 @@ def render_report(
         f"| First drafts that already passed | {_pct(s.first_draft_passed, s.story_cases)} |",
         f"| Mean judge rounds to pass (1 = first draft) | {_fmt(s.mean_rounds_to_pass)} |",
         f"| Mean rubric score, first draft → shown story | {_fmt(s.first_draft_score)} → {_fmt(s.final_score)} |",
-        f"| Word count inside 300–800 (must be 100%) | {_pct(s.in_range, s.story_cases)} |",
-        f"| Word count within ±{judge.TARGET_TOLERANCE:.0%} of the writing aim (target, capped at "
-        f"{pipeline.WRITE_CAP}) | {_pct(s.near_target, s.story_cases)} |",
+        f"| Word count inside {MIN_WORDS}–{MAX_WORDS} (must be 100%) | {_pct(s.in_range, s.story_cases)} |",
+        f"| Word count within ±{TARGET_TOLERANCE:.0%} of the writing aim (target, capped at "
+        f"{WRITE_CAP}) | {_pct(s.near_target, s.story_cases)} |",
         f"| Mean distance from the writing aim | {_fmt(None if s.mean_target_error is None else 100 * s.mean_target_error, 1)}% |",
         f"| Must-block cases declined | {_pct(s.blocked_correct, s.blocked_total)} |",
         f"| Benign cases allowed (no over-blocking) | {_pct(s.allowed_correct, s.allowed_total)} |",
@@ -597,12 +602,13 @@ def _baseline_section(results: list[CaseResult], baselines: list[BaselineResult]
             base = statistics.mean(b.review.scores()[name].score for b, _ in pairs)
             pipe = statistics.mean(shown.review.scores()[name].score for _, shown in pairs)
             lines.append(f"| {name} | {base:.2f} | {pipe:.2f} |")
-        base_steps = statistics.mean(5 - len(judge.missing_steps(b.review)) for b, _ in pairs)
-        pipe_steps = statistics.mean(5 - len(judge.missing_steps(shown.review)) for _, shown in pairs)
-        lines.append(f"| formula steps present (of 5) | {base_steps:.2f} | {pipe_steps:.2f} |")
+        steps = len(STORY_STEPS)
+        base_steps = statistics.mean(steps - len(judge.missing_steps(b.review)) for b, _ in pairs)
+        pipe_steps = statistics.mean(steps - len(judge.missing_steps(shown.review)) for _, shown in pairs)
+        lines.append(f"| formula steps present (of {steps}) | {base_steps:.2f} | {pipe_steps:.2f} |")
         lines.append("")
     in_range = sum(1 for b in baselines if b.checks and b.checks.in_range)
-    lines += [f"Baseline word count inside 300–800: {_pct(in_range, len(baselines))}.", ""]
+    lines += [f"Baseline word count inside {MIN_WORDS}–{MAX_WORDS}: {_pct(in_range, len(baselines))}.", ""]
     return lines
 
 
@@ -670,6 +676,7 @@ def _stories_section(results: list[CaseResult], baselines: list[BaselineResult])
 
 
 def select_cases(names: list[str] | None) -> list[Case]:
+    """The cases named on the command line (by case name or group), or all of them."""
     if not names:
         return list(CASES)
     wanted = set(names)
@@ -683,6 +690,7 @@ def select_cases(names: list[str] | None) -> list[Case]:
 def run_all(
     cases: list[Case], *, workers: int = 4, baseline: bool = True, consistency: bool = True
 ) -> tuple[list[CaseResult], list[BaselineResult], list[ConsistencyResult]]:
+    """Run the pipeline cases, then the baselines and judge-consistency checks on the normal ones."""
     print(f"Running {len(cases)} pipeline cases...", file=sys.stderr)
     results = parallel_map(run_case, cases, workers, "case")
 

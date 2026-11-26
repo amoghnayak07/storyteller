@@ -28,12 +28,20 @@ from typing import Any
 
 from langgraph.types import Command
 
-import guardrails
 import judge
 import llm
 import pipeline
-
-example_requests = "A story about a girl named Alice and her best friend Bob, who happens to be a cat."
+import user_constants as ui
+from constants import (
+    DEFAULT_AGE,
+    DEFAULT_WORDS,
+    MAX_AGE,
+    MAX_WORDS,
+    MIN_AGE,
+    MIN_WORDS,
+    READABILITY_TARGETS,
+    TYPEWRITER_DELAY,
+)
 
 
 def ask(prompt: str) -> str:
@@ -45,21 +53,23 @@ def ask(prompt: str) -> str:
 
 
 def ask_request() -> str:
+    """Ask for the story idea until the user types something."""
     while True:
-        request = ask("What kind of story do you want to hear? ")
+        request = ask(ui.REQUEST_QUESTION)
         if request:
             return request
-        print(f'Tell me a little about the story, for example: "{example_requests}"')
+        print(ui.REQUEST_HINT)
 
 
-def ask_number(prompt: str, low: int, high: int, default: int) -> int:
+def ask_number(question: str, low: int, high: int, default: int) -> int:
+    """Ask for a whole number in ``low..high``; Enter takes ``default``."""
     while True:
-        answer = ask(f"{prompt} ({low}-{high}, Enter for {default}): ")
+        answer = ask(ui.NUMBER_QUESTION.format(question=question, low=low, high=high, default=default))
         if not answer:
             return default
         if answer.isdigit() and low <= int(answer) <= high:
             return int(answer)
-        print(f"Please type a whole number from {low} to {high}.")
+        print(ui.NUMBER_HINT.format(low=low, high=high))
 
 
 # --------------------------------------------------------------------------- #
@@ -68,6 +78,7 @@ def ask_number(prompt: str, low: int, high: int, default: int) -> int:
 
 
 def run_story(request: str, age: int, target_words: int, *, verbose: bool = False) -> None:
+    """Run the graph to the end, printing progress and answering each interrupt from the keyboard."""
     graph = pipeline.build_graph()
     config = {"configurable": {"thread_id": str(uuid.uuid4())}}
     command: Any = pipeline.initial_state(request, age, target_words)
@@ -89,9 +100,9 @@ def run_story(request: str, age: int, target_words: int, *, verbose: bool = Fals
     if values.get("apology"):
         print(f"\n{values['apology']}")
     elif values.get("final_story"):
-        print("\nGoodnight, sleep tight!")
+        print(f"\n{ui.GOODBYE_AFTER_STORY}")
     else:
-        print("\nOkay, sweet dreams!")
+        print(f"\n{ui.GOODBYE_WITHOUT_STORY}")
 
 
 def answer_interrupt(payload: dict[str, Any]) -> str:
@@ -107,13 +118,8 @@ def answer_interrupt(payload: dict[str, Any]) -> str:
         print()
     print(payload["message"])
     if payload["kind"] == "decline":
-        hint = 'Type "y" to hear that one, ' if payload.get("suggestion") else "Type "
-        print(f"{hint}a new idea, or press Enter to stop.")
-    return ask("> ")
-
-
-# Seconds per word for the typewriter replay.
-TYPEWRITER_DELAY = 0.03
+        print(ui.DECLINE_HINT_WITH_SUGGESTION if payload.get("suggestion") else ui.DECLINE_HINT)
+    return ask(ui.REPLY_PROMPT)
 
 
 def typewrite(text: str, *, delay: float = TYPEWRITER_DELAY) -> None:
@@ -212,7 +218,7 @@ def _judge_lines(draft: pipeline.Draft, number: int) -> list[str]:
         lines.append(f"    formula: {'all 5 steps' if not missing else 'missing ' + ', '.join(missing)}")
         lines.append(f"    safe: {r.safe}" + (f" ({r.safety_issue})" if r.safety_issue else ""))
     lines.append(f"    checks: {c.word_count}/{c.target_words} words, FK grade {c.fk_grade} "
-                 f"(target <= {judge.READABILITY_TARGETS[c.band]:.0f}), "
+                 f"(target <= {READABILITY_TARGETS[c.band]:.0f}), "
                  f"moralizing {c.moralizing or 'none'}, banned {c.banned or 'none'}")
     outcome = "PASS" if draft.passed else "fails rubric (hard gates ok)" if draft.gated else "FAILS hard gates"
     lines.append(f"    result: {outcome}")
@@ -240,18 +246,18 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     try:
         request = ask_request()
-        age = ask_number("How old is the listener?", 5, 10, pipeline.DEFAULT_AGE)
-        words = ask_number("How many words?", guardrails.MIN_WORDS, guardrails.MAX_WORDS, pipeline.DEFAULT_WORDS)
+        age = ask_number(ui.AGE_QUESTION, MIN_AGE, MAX_AGE, DEFAULT_AGE)
+        words = ask_number(ui.WORDS_QUESTION, MIN_WORDS, MAX_WORDS, DEFAULT_WORDS)
         run_story(request, age, words, verbose=args.verbose)
         return 0
     except KeyboardInterrupt:
-        print("\nGoodnight!")
+        print(f"\n{ui.GOODBYE_ON_INTERRUPT}")
         return 0
     except llm.LLMError as exc:
         print(f"\n{exc}")
         return 1
     except Exception:
-        print("\nSomething went wrong while telling the story. Please try again.")
+        print(f"\n{ui.UNEXPECTED_ERROR}")
         return 1
 
 

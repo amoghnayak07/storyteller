@@ -54,6 +54,19 @@ import guardrails
 import judge
 import llm
 import prompts
+import user_constants as ui
+from constants import (
+    BEAT_WEIGHTS,
+    DEFAULT_AGE,
+    DEFAULT_WORDS,
+    MAX_AGE,
+    MAX_FRUITLESS_ANSWERS,
+    MAX_REVISIONS,
+    MAX_WORDS,
+    MIN_AGE,
+    MIN_WORDS,
+    WRITE_CAP,
+)
 from schemas import (
     INGREDIENT_NAMES,
     YOU_PICK,
@@ -68,52 +81,6 @@ from schemas import (
     StoryPlan,
     Verdict,
 )
-
-DEFAULT_AGE = 7
-DEFAULT_WORDS = 500
-
-# Fallback beat weights (percent) used when the planner's budgets are unusable.
-_DEFAULT_WEIGHTS = (15, 10, 40, 15, 20)
-
-MAX_FRUITLESS_ANSWERS = 2
-PICK_THE_REST_NOTE = "No worries, I'll pick the rest!"
-
-MAX_REVISIONS = 3
-
-# The writers overshoot long targets (an 800-word target gave drafts of 815-926
-# words in the evals), and 800 is a hard cap with no tolerance. So the plan,
-# the writers, the judge and the length feedback all aim at most this high,
-# while the user's own number stays in ``target_words``.
-WRITE_CAP = 760
-
-APOLOGY = (
-    "I'm sorry, I couldn't get that story just right for bedtime. "
-    "Could you try a different idea?"
-)
-EDIT_APOLOGY = "Sorry, I couldn't make that change work, so the story stays as it was."
-EDIT_PROMPT = (
-    'Want to change anything? Tell me (like "make it funnier" or "give Bob a hat"), '
-    "or press Enter if you're all done."
-)
-_EDIT_FOLLOW_UP = "Want a different change? Tell me, or press Enter if you're all done."
-_EDIT_ACCEPT_HINT = 'Type "y" for that, tell me a different change, or press Enter if you\'re all done.'
-
-_QUIT_WORDS = frozenset({"q", "quit", "exit", "no", "n", "bye"})
-_DONE_WORDS = _QUIT_WORDS | {"done", "nope", "all done", "that's all", "thats all", "nothing"}
-_ACCEPT_WORDS = frozenset({"y", "yes", "yeah", "yep", "ok", "okay", "sure"})
-
-_STATUS: dict[str, tuple[str, ...]] = {
-    "intake": ("Reading your request...", "Peeking at your idea...", "Unrolling your request..."),
-    "planner": ("Sketching the plot...", "Drawing a little story map...", "Plotting the twists and turns..."),
-    "storyteller": ("Writing...", "Dipping the quill in moonlight...", "Spinning the story..."),
-    "judge": (
-        "The judge is peering over its spectacles...",
-        "A very picky owl is reading every word...",
-        "Checking the story from top to tail...",
-    ),
-    "reviser": ("Polishing...", "Smoothing out the wrinkles...", "Sprinkling in a little more sparkle..."),
-    "edit_intake": ("Reading your change...", "Thinking about your change...", "Sharpening the pencil..."),
-}
 
 
 # --------------------------------------------------------------------------- #
@@ -202,15 +169,16 @@ def writing_target(target_words: int) -> int:
 
 
 def band_for_age(age: int) -> AgeBand:
-    if not 5 <= age <= 10:
-        raise ValueError(f"age must be 5-10, got {age}")
+    """The age band that sets the style guide and readability target."""
+    if not MIN_AGE <= age <= MAX_AGE:
+        raise ValueError(f"age must be {MIN_AGE}-{MAX_AGE}, got {age}")
     return "5-6" if age <= 6 else "7-8" if age <= 8 else "9-10"
 
 
 def initial_state(request: str, age: int = DEFAULT_AGE, target_words: int = DEFAULT_WORDS) -> StoryState:
     """The input for a fresh run. Age and length are validated by the CLI."""
-    if not guardrails.MIN_WORDS <= target_words <= guardrails.MAX_WORDS:
-        raise ValueError(f"target_words must be {guardrails.MIN_WORDS}-{guardrails.MAX_WORDS}, got {target_words}")
+    if not MIN_WORDS <= target_words <= MAX_WORDS:
+        raise ValueError(f"target_words must be {MIN_WORDS}-{MAX_WORDS}, got {target_words}")
     return {
         "age": age,
         "band": band_for_age(age),
@@ -265,7 +233,7 @@ def intake(state: StoryState) -> dict[str, Any]:
         fruitless = 0 if made_progress else state.get("fruitless_answers", 0) + 1
         if fruitless >= MAX_FRUITLESS_ANSWERS and ingredients.missing():
             ingredients = ingredients.model_copy(update={name: YOU_PICK for name in ingredients.missing()})
-            notes.append(PICK_THE_REST_NOTE)
+            notes.append(ui.PICK_THE_REST_NOTE)
 
     return {
         "verdict": r.verdict,
@@ -301,9 +269,9 @@ def decline(state: StoryState) -> dict[str, Any]:
     suggestion = state.get("suggestion", "")
     reply = str(interrupt({"kind": "decline", "message": message, "suggestion": suggestion})).strip()
 
-    if not reply or reply.lower().rstrip("!.") in _QUIT_WORDS:
+    if not reply or reply.lower().rstrip("!.") in ui.QUIT_WORDS:
         return {"pending_text": ""}
-    if suggestion and reply.lower().rstrip("!.") in _ACCEPT_WORDS:
+    if suggestion and reply.lower().rstrip("!.") in ui.ACCEPT_WORDS:
         reply = suggestion
     # A retry is a fresh request: start intake over.
     return {
@@ -321,6 +289,7 @@ def decline(state: StoryState) -> dict[str, Any]:
 
 
 def planner(state: StoryState) -> dict[str, Any]:
+    """Turn the request and ingredients into a ``StoryPlan``: title, 5 beats, word budgets."""
     _status("planner")
     aim = writing_target(state["target_words"])
     parts = [
@@ -344,6 +313,7 @@ def planner(state: StoryState) -> dict[str, Any]:
 
 
 def storyteller(state: StoryState) -> dict[str, Any]:
+    """Write the story from the plan; the judge grades it next."""
     _status("storyteller")
     user = "\n\n".join(
         [
@@ -443,10 +413,10 @@ def finish(state: StoryState) -> dict[str, Any]:
             "target_words": state["final_target_words"],
             "edit_history": state.get("edit_history", [])[:-1],
             "story_fresh": False,
-            "edit_message": EDIT_APOLOGY,
+            "edit_message": ui.EDIT_APOLOGY,
             "suggestion": "",
         }
-    return {"apology": APOLOGY}
+    return {"apology": ui.APOLOGY}
 
 
 def ask_edit(state: StoryState) -> dict[str, Any]:
@@ -455,9 +425,9 @@ def ask_edit(state: StoryState) -> dict[str, Any]:
     suggestion = state.get("suggestion", "")
     reason = state.get("edit_message", "")
     if not reason:
-        message = EDIT_PROMPT
+        message = ui.EDIT_PROMPT
     else:
-        message = f"{reason} {_EDIT_ACCEPT_HINT if suggestion else _EDIT_FOLLOW_UP}"
+        message = f"{reason} {ui.EDIT_ACCEPT_HINT if suggestion else ui.EDIT_FOLLOW_UP}"
     reply = str(
         interrupt(
             {
@@ -474,9 +444,9 @@ def ask_edit(state: StoryState) -> dict[str, Any]:
 
     cleared = {"story_fresh": False, "edit_message": "", "suggestion": ""}
     word = reply.lower().rstrip("!.")
-    if not reply or word in _DONE_WORDS:
+    if not reply or word in ui.DONE_WORDS:
         return {**cleared, "pending_text": ""}
-    if suggestion and word in _ACCEPT_WORDS:
+    if suggestion and word in ui.ACCEPT_WORDS:
         reply = suggestion
     return {**cleared, "pending_text": reply}
 
@@ -519,12 +489,12 @@ def edit_intake(state: StoryState) -> dict[str, Any]:
 
 def _status(stage: str) -> None:
     """Emit a playful progress line on the custom stream (ignored by ``invoke``)."""
-    get_stream_writer()({"status": random.choice(_STATUS[stage])})
+    get_stream_writer()({"status": random.choice(ui.STATUS_LINES[stage])})
 
 
 def _refused() -> dict[str, Any]:
-    """A refusal from a writing call is treated as a block (PLAN: guardrail layer 3)."""
-    suggestion = guardrails.FALLBACK_SUGGESTION
+    """A refusal from a writing call is treated as a block (guardrail layer 3, the output gate)."""
+    suggestion = ui.FALLBACK_SUGGESTION
     return {
         "verdict": "blocked",
         "blocked_category": "none",
@@ -653,21 +623,11 @@ def build_graph(checkpointer: Any = None) -> Any:
 # Helpers
 # --------------------------------------------------------------------------- #
 
-_QUESTIONS: dict[IngredientName, str] = {
-    "character": "Who is the story about?",
-    "setting": "Where does it happen?",
-    "background": "What's going on when the story begins? (like \"Bob has never left the garden\")",
-    "moral": "What should the story be about underneath, like sharing or being brave?",
-}
-
-
 def ingredient_question(missing: list[IngredientName], *, again: bool = False) -> str:
     """One friendly message asking for every missing ingredient."""
-    opener = "Almost there! Just tell me:" if again else "Ooh, I like it! A few quick questions before I start:"
-    lines = [opener]
-    lines += [f"  - {_QUESTIONS[name]}" for name in INGREDIENT_NAMES if name in missing]
-    lines.append('Answer any or all of them. Say "you pick" for anything you want me to choose, '
-                 "or just press Enter and I'll pick them all.")
+    lines = [ui.INGREDIENT_OPENER_AGAIN if again else ui.INGREDIENT_OPENER]
+    lines += [f"  - {ui.INGREDIENT_QUESTIONS[name]}" for name in INGREDIENT_NAMES if name in missing]
+    lines.append(ui.INGREDIENT_CLOSER)
     return "\n".join(lines)
 
 
@@ -675,11 +635,11 @@ def rescale_budgets(beats: list[Beat], target: int) -> list[Beat]:
     """Scale the beats' word budgets so they sum exactly to ``target``.
 
     Uses largest-remainder rounding so the total is exact. If the planner's
-    budgets are unusable (all zero or negative), falls back to default weights.
+    budgets are unusable (all zero or negative), falls back to ``BEAT_WEIGHTS``.
     """
     weights = [max(beat.word_budget, 0) for beat in beats]
     if sum(weights) == 0:
-        weights = list(_DEFAULT_WEIGHTS)
+        weights = [BEAT_WEIGHTS[beat.step] for beat in beats]
     total = sum(weights)
     raw = [w * target / total for w in weights]
     budgets = [int(x) for x in raw]
@@ -690,6 +650,7 @@ def rescale_budgets(beats: list[Beat], target: int) -> list[Beat]:
 
 
 def plan_json(plan: StoryPlan) -> str:
+    """The plan as indented JSON, for the writers' user turn."""
     return json.dumps(plan.model_dump(), indent=2)
 
 

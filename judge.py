@@ -1,6 +1,6 @@
 """The judge: an LLM rubric plus deterministic checks, and the pass/gate rules.
 
-Two halves (PLAN.md, "Rubric"):
+Two halves (Submission.md, "The judge"):
 
 - **Deterministic checks** (``run_checks``), pure code: word count (the hard
   300-800 gate, because LLMs miscount words), Flesch-Kincaid readability
@@ -24,21 +24,16 @@ from dataclasses import dataclass, field
 import guardrails
 import llm
 import prompts
+from constants import (
+    JUDGE_MAX_TOKENS,
+    MAX_WORDS,
+    MIN_WORDS,
+    PASS_SCORE,
+    READABILITY_TARGETS,
+    SENTENCE_TARGETS,
+    TARGET_TOLERANCE,
+)
 from schemas import SCORED_CRITERIA, STORY_STEPS, YOU_PICK, AgeBand, Ingredients, JudgeResult
-
-PASS_SCORE = 4
-
-# Thinking at effort "high" counts toward max_tokens; keep well under the SDK's
-# ~21K non-streaming ceiling.
-JUDGE_MAX_TOKENS = 16_000
-
-# Flesch-Kincaid grade targets (feedback only) and the sentence length to suggest.
-READABILITY_TARGETS: dict[AgeBand, float] = {"5-6": 2.0, "7-8": 4.0, "9-10": 6.0}
-SENTENCE_TARGETS: dict[AgeBand, int] = {"5-6": 8, "7-8": 10, "9-10": 13}
-
-# How far from the target a story may drift before the reviser hears about it.
-# The hard gate is the 300-800 range; this is feedback only.
-TARGET_TOLERANCE = 0.15
 
 _WORD_RE = re.compile(r"[A-Za-z0-9]+(?:['’-][A-Za-z0-9]+)*")
 _SENTENCE_END_RE = re.compile(r"[.!?]+[\"'”’)]*(?=\s|$)")
@@ -66,6 +61,7 @@ def word_count(text: str) -> int:
 
 
 def count_sentences(text: str) -> int:
+    """Sentence endings (., ! or ?, with any closing quote), at least 1."""
     return max(1, len(_SENTENCE_END_RE.findall(text.strip())) or 1)
 
 
@@ -85,6 +81,7 @@ def count_syllables(word: str) -> int:
 
 
 def flesch_kincaid_grade(text: str) -> float:
+    """The US school grade a text reads at (lower is easier). Feedback only."""
     words = _WORD_RE.findall(text)
     if not words:
         return 0.0
@@ -94,6 +91,7 @@ def flesch_kincaid_grade(text: str) -> float:
 
 
 def moralizing_phrases(text: str) -> list[str]:
+    """Phrases that state the lesson outright ("the moral of the story...")."""
     return [m.group(0) for m in _MORALIZING_RE.finditer(text)]
 
 
@@ -111,7 +109,7 @@ class Checks:
 
     @property
     def in_range(self) -> bool:
-        return guardrails.MIN_WORDS <= self.word_count <= guardrails.MAX_WORDS
+        return MIN_WORDS <= self.word_count <= MAX_WORDS
 
     @property
     def readable(self) -> bool:
@@ -128,7 +126,7 @@ class Checks:
             diff = self.target_words - self.word_count
             verb = "Add" if diff > 0 else "Cut"
             hard = "" if self.in_range else (
-                f" It must be between {guardrails.MIN_WORDS} and {guardrails.MAX_WORDS} words."
+                f" It must be between {MIN_WORDS} and {MAX_WORDS} words."
             )
             notes.append(
                 f"Length: the story is {self.word_count} words; the target is {self.target_words}.{hard} "
@@ -150,6 +148,7 @@ class Checks:
 
 
 def run_checks(text: str, band: AgeBand, target_words: int) -> Checks:
+    """Run every code-only check on one draft."""
     words = word_count(text)
     return Checks(
         band=band,
@@ -177,6 +176,7 @@ def judge_user_turn(
     target_words: int,
     edit_requests: list[str],
 ) -> str:
+    """The judge's user turn: the request and context, tagged. Never the plan."""
     shown = {
         name: ("(the writer's choice)" if value == YOU_PICK else value)
         for name, value in ingredients.model_dump().items()
@@ -221,12 +221,14 @@ def passes_hard_gates(result: JudgeResult | None, checks: Checks) -> bool:
 
 
 def missing_steps(result: JudgeResult | None) -> list[str]:
+    """Bedtime-formula steps the judge found missing (all of them if it refused)."""
     if result is None:
         return list(STORY_STEPS)
     return [check.step for check in result.formula_steps if not check.present]
 
 
 def low_scores(result: JudgeResult | None) -> list[str]:
+    """Criteria scored below ``PASS_SCORE`` (all of them if the judge refused)."""
     if result is None:
         return list(SCORED_CRITERIA)
     return [name for name, c in result.scores().items() if c.score < PASS_SCORE]
