@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 from anthropic.types import Message
 
+import constants
 import llm
 
 
@@ -29,7 +30,7 @@ def make_message(
             "id": "msg_test",
             "type": "message",
             "role": "assistant",
-            "model": llm.MODEL,
+            "model": constants.MODEL,
             "content": content,
             "stop_reason": stop_reason,
             "stop_sequence": None,

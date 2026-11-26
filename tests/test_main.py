@@ -7,7 +7,7 @@ from conftest import make_message
 from test_pipeline import REVISED, STORY, edit_json, intake_json, judged, plan_json
 
 import main
-import pipeline
+import user_constants as ui
 
 
 @pytest.fixture
@@ -33,9 +33,9 @@ def test_story_is_shown_once_with_progress_lines_then_goodnight(fake_client, typ
 
     assert out.count(STORY) == 1
     assert "Bob and the Big Fence" in out
-    assert pipeline.EDIT_PROMPT in out
-    assert any(line in out for line in pipeline._STATUS["judge"])
-    assert any(line in out for line in pipeline._STATUS["planner"])
+    assert ui.EDIT_PROMPT in out
+    assert any(line in out for line in ui.STATUS_LINES["judge"])
+    assert any(line in out for line in ui.STATUS_LINES["planner"])
     assert out.rstrip().endswith("Goodnight, sleep tight!")
     assert "[judge]" not in out
 
@@ -67,7 +67,7 @@ def test_apology_when_no_draft_can_be_shown(fake_client, typed, capsys):
     typed()
     main.run_story("Alice and Bob", 7, 500)
     out = capsys.readouterr().out
-    assert pipeline.APOLOGY in out
+    assert ui.APOLOGY in out
     assert short not in out
 
 

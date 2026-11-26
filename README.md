@@ -1,3 +1,5 @@
+> **Reviewers: the submission write-up is in [Submission.md](Submission.md)** (how to run it, the block diagram, design rationale, eval results and sample stories). This README is the original assignment, left unchanged below.
+
 # Hippocratic AI Coding Assignment
 Welcome to the [Hippocratic AI](https://www.hippocraticai.com) coding assignment
 

@@ -398,7 +398,7 @@ A very picky owl is reading every word...
 
 </details>
 
-More stories, all 11 from the eval run with their baseline counterparts, are in [`eval_results.md`](eval_results.md#stories).
+More stories, all 13 from the eval run with their baseline counterparts, are in [`eval_results.md`](eval_results.md#stories).
 
 ---
 
@@ -421,6 +421,8 @@ What I would build next is in the docstring at the top of [`main.py`](main.py).
 | `main.py` | CLI driver: collects inputs, streams progress lines, answers interrupts, `--verbose` trace, `--diagram` |
 | `pipeline.py` | LangGraph `StateGraph`: nodes, routing, the three interrupts, revision loop, budget rescaling |
 | `prompts.py` | Every system prompt, built from shared blocks; `tag()` wraps and escapes user text |
+| `constants.py` | Every tunable setting: model, token budgets, age and word limits, `WRITE_CAP`, beat weights, revision limit, pass score, readability targets, eval prices |
+| `user_constants.py` | Every fixed piece of text the user reads: questions, progress lines, decline and off-task replies, apologies, edit notes, error messages |
 | `guardrails.py` | Keyword pre-filter, banned-word scan, request and edit screening with tailored declines |
 | `judge.py` | Deterministic checks (word count, readability, moralizing, banned words), the LLM judge call, pass and rank logic, reviser notes |
 | `schemas.py` | Pydantic models for every structured output (`IntakeResult`, `StoryPlan`, `JudgeResult`, …) |

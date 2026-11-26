@@ -9,7 +9,11 @@ tag early and smuggle in its own.
 
 from __future__ import annotations
 
+from constants import BEAT_WEIGHTS, MAX_WORDS, MIN_WORDS
 from schemas import YOU_PICK
+
+# "hook about 15%, problem about 10%, ...", from the same weights the code uses.
+_BUDGET_SPLIT = ", ".join(f"{step} about {share}%" for step, share in BEAT_WEIGHTS.items())
 
 
 def tag(name: str, text: str) -> str:
@@ -191,7 +195,7 @@ in your own words (e.g. "Add more dialogue between Alice and Bob in the \
 middle of the story").
 - new_target_words: if the user asks for a length, the number of words they \
 mean (resolve "shorter"/"longer" against <current_target_words>: about 30% \
-less or more). Report what they asked for even if it is outside 300-800. \
+less or more). Report what they asked for even if it is outside {MIN_WORDS}-{MAX_WORDS}. \
 Otherwise 0.
 - drops_story_step: every story must keep all five parts: the hook, the \
 small problem, the gentle middle of tries, the simple resolution and the \
@@ -331,8 +335,7 @@ the overused names Lily and Max; pick something fresh.
 middle, resolve, wind_down). Each summary is 2-4 sentences saying exactly \
 what happens in this story at that step, including the hero's own choice \
 that drives it. Work every item in <extra_elements> into the beats.
-- word_budget: split <target_words> across the beats: hook about 15%, \
-problem about 10%, middle about 40%, resolve about 15%, wind_down about 20%. \
+- word_budget: split <target_words> across the beats: {_BUDGET_SPLIT}. \
 The budgets should add up to <target_words>.
 
 If <edit_requests> is present, the user asked for these changes to an \
@@ -389,7 +392,7 @@ one story from the plan you are given.
 
 - Follow the plan's 5 beats in order, and give each beat roughly its \
 word_budget. Hit the total <target_words> as closely as you can; never go \
-below 300 or above 800 words.
+below {MIN_WORDS} or above {MAX_WORDS} words.
 - Write for the <age_band> in the user turn: match its sentence length, \
 vocabulary and intensity, using its sample as a guide to the level, not as \
 text to copy.
@@ -582,7 +585,7 @@ not a list of changes.
 - Fix every note. Keep the scenes, lines and images that the notes do not \
 mention: they scored well.
 - Keep all 5 bedtime formula steps in order. Hit <target_words> as closely as \
-you can; never go below 300 or above 800 words.
+you can; never go below {MIN_WORDS} or above {MAX_WORDS} words.
 - Write for the <age_band>: match its sentence length, vocabulary and \
 intensity.
 

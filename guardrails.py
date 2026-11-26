@@ -1,6 +1,6 @@
 """Screening for every piece of user text, and the banned-word scan for stories.
 
-Layers that live here (see PLAN.md, "Guardrails"):
+Layers that live here (Submission.md, "Guardrails: four layers"):
 
 1. **Keyword pre-filter** (``prefilter``), pure code, run first.
    - An injection phrase ends screening immediately with the off-task reply;
@@ -12,7 +12,7 @@ Layers that live here (see PLAN.md, "Guardrails"):
    ``low``: one of ``story``, ``off_task``, ``blocked``, ``public_figure``,
    plus ingredient extraction (requests) or edit routing (edits).
 3. The **banned-word scan** (``banned_words``) is the deterministic half of the
-   output gate; the judge's ``safe`` flag is the other half (branch 4).
+   output gate; the judge's ``safe`` flag is the other half (``judge.py``).
 
 A refusal from the model (``LLMRefusalError``) is treated as a block.
 
@@ -30,6 +30,8 @@ from typing import Literal
 
 import llm
 import prompts
+import user_constants as ui
+from constants import MAX_WORDS, MIN_WORDS
 from schemas import (
     INGREDIENT_NAMES,
     YOU_PICK,
@@ -41,16 +43,6 @@ from schemas import (
     IntakeResult,
     Verdict,
 )
-
-MIN_WORDS = 300
-MAX_WORDS = 800
-
-OFF_TASK_MESSAGE = (
-    "I only tell bedtime stories, give me a character and a story background. Lemme cook!"
-)
-
-# Used when the model refuses, or returns a decline without a suggestion.
-FALLBACK_SUGGESTION = "a sleepy little owl who can't find the moon"
 
 # --------------------------------------------------------------------------- #
 # Keyword lexicon
@@ -172,14 +164,14 @@ _SCARY: frozenset[str] = frozenset(
 def decline_message(verdict: Verdict, blocked_category: BlockedCategory, suggestion: str) -> str:
     """The warm, never-accusatory reply for a non-story verdict."""
     if verdict == "off_task":
-        return OFF_TASK_MESSAGE
+        return ui.OFF_TASK_MESSAGE
     if verdict == "public_figure":
-        opener = "I only make up stories about made-up characters, not real people!"
+        opener = ui.PUBLIC_FIGURE_OPENER
     elif blocked_category in _SCARY:
-        opener = "That one's a bit too scary for bedtime!"
+        opener = ui.SCARY_OPENER
     else:
-        opener = "That one's not quite right for a bedtime story!"
-    return f"{opener} How about {suggestion}?"
+        opener = ui.UNSUITABLE_OPENER
+    return ui.SUGGESTION_TEMPLATE.format(opener=opener, suggestion=suggestion)
 
 
 # --------------------------------------------------------------------------- #
@@ -266,7 +258,7 @@ def _refused_intake(known: Ingredients, known_category: Category | None, flag: F
         category=known_category or "everyday",
         ingredients=known,
         extra_elements=[],
-        suggestion=FALLBACK_SUGGESTION,
+        suggestion=ui.FALLBACK_SUGGESTION,
     )
 
 
@@ -309,7 +301,9 @@ def screen_edit(text: str, *, ingredients: Ingredients, target_words: int) -> Ed
         call = llm.generate_structured(prompts.EDIT_SYSTEM, "\n\n".join(parts), EditIntake, effort="low")
     except llm.LLMRefusalError:
         category: BlockedCategory = flag.category if flag else "none"
-        return EditScreening(_declined_edit("blocked", category, ingredients, FALLBACK_SUGGESTION), target_words, [])
+        return EditScreening(
+            _declined_edit("blocked", category, ingredients, ui.FALLBACK_SUGGESTION), target_words, []
+        )
 
     result = call.value
     verdict, category = _enforce_flag(result.verdict, result.blocked_category, flag)
@@ -333,13 +327,11 @@ def screen_edit(text: str, *, ingredients: Ingredients, target_words: int) -> Ed
         new_target = min(max(result.new_target_words, MIN_WORDS), MAX_WORDS)
         if new_target != result.new_target_words:
             bound = "longest" if new_target == MAX_WORDS else "shortest"
-            notes.append(f"{new_target} words is the {bound} story I tell, so I'll make it {new_target}.")
+            notes.append(ui.LENGTH_CLAMPED_NOTE.format(words=new_target, bound=bound))
     if result.drops_story_step:
-        notes.append(
-            "Every story needs its little bump in the road, so I'll make that part gentler instead of taking it out."
-        )
+        notes.append(ui.STEP_SOFTENED_NOTE)
     if result.asks_age_change:
-        notes.append("The age stays the same for this session; start a new story to change it.")
+        notes.append(ui.AGE_FIXED_NOTE)
     return EditScreening(result, new_target, notes, call.usage)
 
 
@@ -392,7 +384,7 @@ def _clean_suggestion(verdict: Verdict, suggestion: str) -> str:
     if verdict not in ("blocked", "public_figure"):
         return ""
     cleaned = suggestion.strip().rstrip(".!?").strip()
-    return cleaned or FALLBACK_SUGGESTION
+    return cleaned or ui.FALLBACK_SUGGESTION
 
 
 def _normalize_value(value: str) -> str:

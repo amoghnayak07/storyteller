@@ -38,16 +38,10 @@ import anthropic
 from dotenv import load_dotenv
 from pydantic import BaseModel, ValidationError
 
-MODEL = "claude-haiku-5-5"
+import user_constants as ui
+from constants import DEFAULT_MAX_TOKENS, MAX_ATTEMPTS, MODEL
 
 Effort = Literal["low", "medium", "high"]
-
-# Thinking tokens count toward max_tokens. An 800-word story is ~1.1K tokens,
-# so 8K leaves ample headroom. Kept below the SDK's ~21K non-streaming ceiling.
-DEFAULT_MAX_TOKENS = 8_000
-
-# One retry for malformed/truncated output (API-level retries are the SDK's job).
-MAX_ATTEMPTS = 2
 
 T = TypeVar("T")
 ModelT = TypeVar("ModelT", bound=BaseModel)
@@ -116,9 +110,7 @@ def get_client() -> Any:
         load_dotenv()
         api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
         if not api_key:
-            raise LLMError(
-                "ANTHROPIC_API_KEY is not set. Copy .env.example to .env and add your key."
-            )
+            raise LLMError(ui.MISSING_KEY_ERROR)
         _client = anthropic.Anthropic(api_key=api_key)
     return _client
 
@@ -149,7 +141,7 @@ def generate_text(
         text = _response_text(response).strip()
         if response.stop_reason != "max_tokens" and text:
             return LLMResult(value=text, usage=usage)
-    raise LLMError("The storyteller got cut off mid-story. Please try again.")
+    raise LLMError(ui.CUT_OFF_ERROR)
 
 
 def generate_structured(
@@ -176,7 +168,7 @@ def generate_structured(
         except ValidationError:
             continue
         return LLMResult(value=value, usage=usage)
-    raise LLMError(f"Got an unreadable answer twice while building the {schema.__name__}. Please try again.")
+    raise LLMError(ui.UNREADABLE_ERROR.format(schema=schema.__name__))
 
 
 # --------------------------------------------------------------------------- #
@@ -210,14 +202,14 @@ def _call(
             output_config=output_config,
         )
     except anthropic.AuthenticationError as exc:
-        raise LLMError("Your Anthropic API key was rejected. Check ANTHROPIC_API_KEY in .env.") from exc
+        raise LLMError(ui.BAD_KEY_ERROR) from exc
     except anthropic.APIConnectionError as exc:
-        raise LLMError("Couldn't reach Anthropic. Check your internet connection and try again.") from exc
+        raise LLMError(ui.CONNECTION_ERROR) from exc
     except anthropic.APIStatusError as exc:
-        raise LLMError(f"Anthropic returned an error ({exc.status_code}). Please try again in a moment.") from exc
+        raise LLMError(ui.API_STATUS_ERROR.format(status=exc.status_code)) from exc
 
     if response.stop_reason == "refusal":
-        raise LLMRefusalError("The model declined this request.")
+        raise LLMRefusalError(ui.REFUSAL_ERROR)
     return response
 
 

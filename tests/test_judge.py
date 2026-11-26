@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from conftest import make_message
 
+import constants
 import judge
 import prompts
 from schemas import SCORED_CRITERIA, STORY_STEPS, YOU_PICK, CriterionScore, Ingredients, JudgeResult, StepCheck
@@ -206,7 +207,7 @@ def test_judge_call_shape(fake_client):
     assert call["system"][0]["text"] == prompts.JUDGE_SYSTEM
     assert call["output_config"]["effort"] == "high"
     assert call["output_config"]["format"]["type"] == "json_schema"
-    assert call["max_tokens"] == judge.JUDGE_MAX_TOKENS
+    assert call["max_tokens"] == constants.JUDGE_MAX_TOKENS
     user = call["messages"][0]["content"]
     assert "<story>\nAlice &amp; Bob &lt;went&gt; out.\n</story>" in user
     assert "(the writer's choice)" in user and YOU_PICK not in user
